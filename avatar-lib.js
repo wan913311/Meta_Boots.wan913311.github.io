@@ -72,21 +72,29 @@ window.AvatarLib = (function () {
     return true;
   }
 
-  function tint(S) {
-    const set = (prefix, hex) => Object.values(matCache).forEach(m => {
-      if (m.name.indexOf(prefix) === 0) m.color.setStyle(hex).convertSRGBToLinear();
-    });
-    set('TINT_HAIR', PALETTE.hairColor[S.hairColor]);
-    set('TINT_SKIN', PALETTE.skin[S.skin]);
-    set('TINT_OUTFIT', PALETTE.outfitColor[S.outfitColor]);
+  // 每個分身各自一份可換色材質（多人同框時顏色才不會互相影響）
+  function tintColor(name, S) {
+    if (name.indexOf('TINT_HAIR') === 0) return PALETTE.hairColor[S.hairColor];
+    if (name.indexOf('TINT_SKIN') === 0) return PALETTE.skin[S.skin];
+    if (name.indexOf('TINT_OUTFIT') === 0) return PALETTE.outfitColor[S.outfitColor];
+    return null;
   }
 
   // 回傳和主控台一樣的骨架介面：root / upper / head / arms{1:左,-1:右} / eyes / mouthIdle / mouthOpen
   function make(S) {
     if (!template) return null;
     const clone = template.clone(true);
-    clone.traverse(o => { if (o !== clone) o.visible = partVisible(o.name, S); });
-    tint(S);
+    const own = {};
+    clone.traverse(o => {
+      if (o !== clone) o.visible = partVisible(o.name, S);
+      if (o.isMesh && o.material && !Array.isArray(o.material)) {
+        const hex = tintColor(o.material.name, S);
+        if (hex) {
+          if (!own[o.material.name]) { own[o.material.name] = o.material.clone(); own[o.material.name].color.setStyle(hex).convertSRGBToLinear(); }
+          o.material = own[o.material.name];
+        }
+      }
+    });
     const g = n => clone.getObjectByName(n);
     const root = new T.Group(); root.add(clone);
     const mouthIdle = g('mouth_' + S.mouth) || new T.Group();
@@ -99,7 +107,7 @@ window.AvatarLib = (function () {
       elbows: g('PIVOT_Elbow_L') ? { 1: g('PIVOT_Elbow_L'), '-1': g('PIVOT_Elbow_R') } : null,
       legs: g('PIVOT_Leg_L') ? { 1: g('PIVOT_Leg_L'), '-1': g('PIVOT_Leg_R') } : null,
       knees: g('PIVOT_Knee_L') ? { 1: g('PIVOT_Knee_L'), '-1': g('PIVOT_Knee_R') } : null,
-      mouthIdle, mouthOpen, fromGLB: true
+      mouthIdle, mouthOpen, fromGLB: true, ownMaterials: Object.values(own)
     };
   }
 

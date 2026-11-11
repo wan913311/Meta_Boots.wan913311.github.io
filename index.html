@@ -20,6 +20,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--f-body); overflow: hidden; }
 [hidden] { display: none !important; }
+body.has-console .status, body.has-console .keys { display: none; }
+body.has-console .camwrap:not(.big) { display: none; }
 #gl, #frame { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #gl { image-rendering: pixelated; filter: var(--grade); }
 :root { --grade: contrast(1.08) saturate(.9) sepia(.08); }
@@ -33,7 +35,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .pill.mono { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
 
 .camwrap { position: fixed; right: 18px; bottom: 64px; width: 260px; aspect-ratio: 16/9; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; z-index: 4; }
-.camwrap video, .camwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.camwrap video, .camwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.camwrap video { transform: scaleX(-1); }
 .camwrap.big { position: relative; right: auto; bottom: auto; width: min(560px, 80vw); border: 2px solid var(--ink); }
 .scanbox { position: absolute; inset: 14% 30%; border: 3px solid var(--pop); border-radius: 14px; box-shadow: 0 0 0 999px rgba(0,0,0,.35); }
 .scanbox::after { content: ""; position: absolute; left: 6%; right: 6%; height: 2px; background: var(--pop); top: 10%; animation: scan 1.6s ease-in-out infinite alternate; }
@@ -135,7 +138,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 <div class="keys" id="keys">
   <span><kbd>空白</kbd><kbd>→</kbd>拍照（簡報筆）</span>
   <span>雙手舉高 1 秒也能拍照</span>
-  <span><kbd>N</kbd>下一位</span>
+  <span><kbd>N</kbd>清空舞台</span>
+  <span><kbd>R</kbd>重新綁定</span>
   <span><kbd>B</kbd>換背景</span>
   <span><kbd>K</kbd>頭部校正</span>
   <span><kbd>V</kbd>換鏡頭</span>
@@ -198,7 +202,7 @@ function decodePayload(text) {
   if (!m) return null;
   const S = paramsToState(m[1]); if (!S) return null;
   try { S.name = b64urlDecode(m[3]); } catch (e) { S.name = ''; }
-  S.id = m[2];
+  S.id = m[2]; S.params = m[1];
   return S;
 }
 
@@ -211,7 +215,7 @@ renderer.setPixelRatio(1 / pixelScale);
 renderer.outputEncoding = T.sRGBEncoding;
 const scene = new T.Scene();
 const camera = new T.PerspectiveCamera(30, 16 / 9, 0.1, 60);
-camera.position.set(0, 1.12, 5.6);
+camera.position.set(0, 1.15, 6.3);
 camera.lookAt(0, 1.0, 0);
 scene.add(new T.HemisphereLight(0xfff4ea, 0x5a5670, 0.6));
 const sun = new T.DirectionalLight(0xfff0dd, 1.05); sun.position.set(3, 4, 3); scene.add(sun);
@@ -223,7 +227,7 @@ const THEMES = [
   { name: '晴天草地', top: '#7cc6ff', bottom: '#e6fbff', dot: 'rgba(255,255,255,.35)', floor: '#7ad37a', shapes: ['#ffffff', '#ffd23f', '#ff8fa3', '#4a7bf7'], frame: '#ffd23f', rim: 0xffffff }
 ];
 let themeIdx = 0;
-const floor = new T.Mesh(new T.CircleGeometry(2.4, 7), new T.MeshLambertMaterial({ color: '#fff', transparent: true, opacity: 0.35 }));
+const floor = new T.Mesh(new T.CircleGeometry(3.4, 9), new T.MeshLambertMaterial({ color: '#fff', transparent: true, opacity: 0.35 }));
 floor.rotation.x = -PI / 2; floor.position.y = -0.01; scene.add(floor);
 const shadow = new T.Mesh(new T.CircleGeometry(0.62, 24), new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.16 }));
 shadow.rotation.x = -PI / 2; shadow.position.y = 0.003; scene.add(shadow);
@@ -257,7 +261,7 @@ function applyTheme() {
 }
 
 // ================= 分身 Rig（造型與手機頁相同，但拆成可動的骨架） =================
-let rig = null, current = null;
+const actors = { L: null, R: null };   // 舞台左右兩個位置
 function buildRig(S) {
   const root = new T.Group(); root.userData.o = new T.Vector3();
   const skin = SKIN[S.skin], hc = HAIR_COLORS[S.hairColor], oc = OUTFIT_COLORS[S.outfitColor];
@@ -393,27 +397,75 @@ function shade(hex, amt) {
 }
 function disposeRig(r) { if (r.fromGLB) return; r.root.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
 
-function loadAvatar(S) {
-  if (rig) { scene.remove(rig.root); disposeRig(rig); }
-  current = S; rig = (window.AvatarLib && AvatarLib.ready) ? AvatarLib.make(S) : buildRig(S); scene.add(rig.root);
-  resetPose(); calib = null;
-  setState('live');
-  drawOverlay();
-  toast('歡迎 ' + (S.name || '訪客') + '！');
+const SLOT_X = { L: -1.0, R: 1.0 };      // 還沒綁到人時站的位置
+const STAGE_HALF = 1.8;                     // 分身可以走動的左右範圍（公尺）
+const actorList = () => ['L', 'R'].map(k => actors[k]).filter(Boolean);
+function newActor(slot, S) {
+  const r = (window.AvatarLib && AvatarLib.ready) ? AvatarLib.make(S) : buildRig(S);
+  const sh = new T.Mesh(shadow.geometry, shadow.material); sh.rotation.x = -PI / 2; sh.position.y = 0.003;
+  scene.add(r.root); scene.add(sh);
+  const a = { slot, S, rig: r, shadow: sh, tgt: freshTargets(), cur: freshTargets(), calib: null, calibBuf: [],
+    lastPoseT: -10, lastFaceT: -10, lastLegT: -10, track: null, handsUpSince: 0, lastPosLog: 0 };
+  a.tgt.sway = a.cur.sway = SLOT_X[slot];
+  r.root.position.x = SLOT_X[slot];
+  return a;
 }
-function unloadAvatar() {
-  if (rig) { scene.remove(rig.root); disposeRig(rig); }
-  rig = null; current = null; drawOverlay(); setState('idle');
+function removeActor(slot) {
+  const a = actors[slot]; if (!a) return;
+  scene.remove(a.rig.root); scene.remove(a.shadow);
+  if (a.rig.ownMaterials) a.rig.ownMaterials.forEach(m => m.dispose());
+  disposeRig(a.rig);
+  if (a.track) a.track.actor = null;
+  actors[slot] = null;
+}
+function slotsNow() { return { L: actors.L ? actors.L.S : null, R: actors.R ? actors.R.S : null }; }
+function sameS(a, b) { return a && b && a.id === b.id && a.params === b.params && a.name === b.name; }
+function setSlots(slots) {
+  let changed = false;
+  ['L', 'R'].forEach(k => {
+    const S = slots[k] || null, a = actors[k];
+    if (!S) { if (a) { removeActor(k); changed = true; } return; }
+    if (a && sameS(a.S, S)) return;
+    removeActor(k); actors[k] = newActor(k, S); changed = true;
+    toast('歡迎 ' + (S.name || '訪客') + '！');
+  });
+  if (changed) { drawOverlay(); setState(actorList().length ? 'live' : 'idle'); postStatus(); }
+}
+function rebuildActors() {
+  ['L', 'R'].forEach(k => { const a = actors[k]; if (a) { const S = a.S; removeActor(k); actors[k] = newActor(k, S); } });
+}
+// 掃到分身票：有控制台 → 交給控制台登記排隊；沒有控制台 → 直接上台（單機模式）
+const recentScan = {};
+const BOOT_T = performance.now();
+function registerScan(S) {
+  const now = performance.now();
+  // 剛打開頁面的前 3 秒還不知道控制台在不在，先等一下再決定
+  if (!consoleOnline() && now - BOOT_T < 3000) { setTimeout(() => registerScan(S), 3000 - (now - BOOT_T)); return; }
+  if (actorList().some(a => a.S.id === S.id)) return;          // 已經在台上的人，不用重複登記
+  if (recentScan[S.id] && now - recentScan[S.id] < 6000) return;
+  recentScan[S.id] = now;
+  if (consoleOnline()) {
+    post({ type: 'scan', S, t: Date.now() });
+    toast('已登記：' + (S.name || '訪客') + '，請等工作人員叫號');
+    return;
+  }
+  const slots = slotsNow();
+  if (!slots.L) slots.L = S; else if (!slots.R) slots.R = S; else { toast('舞台已經滿了，請等一下'); return; }
+  setSlots(slots);
+}
+function clearStage() {
+  if (consoleOnline()) post({ type: 'requestClear' });
+  setSlots({ L: null, R: null });
 }
 
-// ================= 動補 → 分身（3D：肩、肘、髖、膝） =================
+// ================= 動補 → 分身（3D：肩、肘、髖、膝；每個角色各自一份） =================
 // MediaPipe worldLandmarks：以骨盆為原點的 3D 公尺座標，x 右、y 下、z 遠離鏡頭。
 // 轉成分身座標並鏡像：(-x, -y, -z) → 分身 x 右、y 上、z 朝鏡頭；本人右手 → 畫面右邊的手 (s = +1, _L)
 const V3 = T.Vector3, DOWN = new V3(0, -1, 0);
 const restArm = s => new V3(Math.sin(0.42) * s, -Math.cos(0.42), 0);
 const SIDES = [1, -1];
 const IDX = { 1: { sh: 12, el: 14, wr: 16, hip: 24, kn: 26, an: 28 }, '-1': { sh: 11, el: 13, wr: 15, hip: 23, kn: 25, an: 27 } };
-const LEN = { thigh: 0.16, shin: 0.24, hip: 0.40 };   // 模型的腿長（決定腳踩地的高度）
+const LEN = { thigh: 0.16, shin: 0.24, hip: 0.40 };
 function freshTargets() {
   return {
     lean: 0, yaw: 0, hipYaw: 0, sway: 0, hy: 0, hp: 0, hr: 0, jaw: 0, blink: { 1: 0, '-1': 0 },
@@ -421,85 +473,157 @@ function freshTargets() {
     thigh: { 1: DOWN.clone(), '-1': DOWN.clone() }, shin: { 1: DOWN.clone(), '-1': DOWN.clone() }
   };
 }
-const tgt = freshTargets();
-let cur = freshTargets();
-let lastPoseT = -10, lastFaceT = -10, lastLegT = -10, calib = null, calibBuf = [];
-function resetPose() { Object.assign(tgt, freshTargets()); cur = freshTargets(); }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const vis = p => (p.visibility == null ? 1 : p.visibility);
 let vAspect = 16 / 9;
-let handsUpSince = 0;
 
-function onPose(lm, wl, tNow) {
-  const P = i => ({ x: (1 - lm[i].x) * vAspect, y: lm[i].y, v: vis(lm[i]) });
-  const L = P(11), R = P(12);
-  if (L.v > 0.5 && R.v > 0.5) tgt.sway = clamp(((L.x + R.x) / 2 / vAspect - 0.5) * 2.6, -1.3, 1.3);
-  // 雙手舉高拍照
+// ---- 多人追蹤：偵測到的人 → track（靠位置延續），track 綁到舞台上的角色
+// settings 由控制台傳來；zone = 遊玩區（畫面左右範圍，鏡像後 0~1），minShoulder = 肩寬門檻（太小 = 太遠的路人）
+const settings = { zone: [0.06, 0.94], minShoulder: 0.07 };
+let tracks = [], nextTrackId = 1, lastDets = [];
+function detInfo(lm) {
+  const a = lm[11], b = lm[12];
+  return { x: 1 - (a.x + b.x) / 2, y: (a.y + b.y) / 2, w: Math.abs(a.x - b.x), ok: vis(a) > 0.5 && vis(b) > 0.5 };
+}
+function inPlay(c) { return c.ok && c.w >= settings.minShoulder && c.x >= settings.zone[0] && c.x <= settings.zone[1]; }
+function updateTracks(dets, now) {
+  const play = dets.filter(d => inPlay(d.c));
+  dets.forEach(d => { d.play = play.includes(d); d.track = null; });
+  const pairs = [];
+  tracks.forEach(t => play.forEach(d => {
+    const dist = Math.hypot(t.x - d.c.x, (t.y - d.c.y) * 0.6) + Math.abs(t.w - d.c.w) * 0.8;
+    const gate = 0.16 + Math.min(0.25, (now - t.seen) / 1000 * 0.25);
+    if (dist < gate) pairs.push([dist, t, d]);
+  }));
+  pairs.sort((a, b) => a[0] - b[0]);
+  const usedT = new Set(), usedD = new Set();
+  for (const [, t, d] of pairs) {
+    if (usedT.has(t) || usedD.has(d)) continue;
+    usedT.add(t); usedD.add(d);
+    t.x = d.c.x; t.y = d.c.y; t.w = d.c.w; t.seen = now; t.det = d; d.track = t;
+  }
+  tracks.forEach(t => { if (!usedT.has(t)) t.det = null; });
+  play.forEach(d => { if (!usedD.has(d)) { const t = { id: nextTrackId++, x: d.c.x, y: d.c.y, w: d.c.w, seen: now, born: now, det: d, actor: null }; d.track = t; tracks.push(t); } });
+  tracks = tracks.filter(t => {
+    const keep = now - t.seen < 1500;          // 被擋住 1.5 秒內還保留綁定
+    if (!keep && t.actor) { t.actor.track = null; t.actor = null; }
+    return keep;
+  });
+  bindTracks(now);
+}
+function bindTracks(now) {
+  const need = ['L', 'R'].filter(k => actors[k] && !actors[k].track);
+  if (!need.length) return;
+  const free = () => tracks.filter(t => !t.actor && t.det && now - t.born > 400);   // 穩定出現 0.4 秒才綁，避免路過的人
+  let cand = free();
+  if (!cand.length) return;
+  if (need.length === 2 && cand.length >= 2) {
+    cand.sort((a, b) => a.x - b.x);
+    bind(actors.L, cand[0]); bind(actors.R, cand[cand.length - 1]); return;
+  }
+  need.forEach(k => {
+    cand = free(); if (!cand.length) return;
+    let pick;
+    if (actorList().length === 1) pick = cand.sort((a, b) => (b.w - Math.abs(b.x - 0.5) * 0.15) - (a.w - Math.abs(a.x - 0.5) * 0.15))[0];   // 一個人：挑最近、最中間的
+    else pick = cand.sort((a, b) => a.x - b.x)[k === 'L' ? 0 : cand.length - 1];                                                     // 兩個人：左配左、右配右
+    bind(actors[k], pick);
+  });
+}
+function bind(a, t) {
+  a.track = t; t.actor = a; a.calib = null; a.calibBuf = [];
+  postStatus();
+}
+function rebindAll() {
+  tracks.forEach(t => { t.actor = null; t.born = performance.now(); });
+  actorList().forEach(a => { a.track = null; });
+  toast('重新綁定：請站好不動 1 秒');
+  postStatus();
+}
+
+function onPose(a, lm, wl, tNow) {
+  if (a.track) a.tgt.sway = clamp((a.track.x - 0.5) * STAGE_HALF * 2.2, -STAGE_HALF, STAGE_HALF);
+  // 雙手舉高拍照（任何一位都可以）
   const nose = lm[0], up = lm[15].y < nose.y && lm[16].y < nose.y && vis(lm[15]) > 0.5 && vis(lm[16]) > 0.5;
   if (up && state === 'live') {
-    if (!handsUpSince) handsUpSince = tNow;
-    else if (tNow - handsUpSince > HANDS_UP_SEC * 1000) { handsUpSince = 0; startCountdown(); }
-  } else handsUpSince = 0;
-  if (wl) onWorld(wl, tNow);
-  lastPoseT = tNow;
+    if (!a.handsUpSince) a.handsUpSince = tNow;
+    else if (tNow - a.handsUpSince > HANDS_UP_SEC * 1000) { a.handsUpSince = 0; startCountdown(); }
+  } else a.handsUpSince = 0;
+  if (wl) onWorld(a, wl, tNow);
+  a.lastPoseT = tNow;
+  if (tNow - a.lastPosLog > 1000 && a.track) {
+    a.lastPosLog = tNow;
+    post({ type: 'pos', id: a.S.id, t: Date.now(), x: +a.track.x.toFixed(3), w: +a.track.w.toFixed(3) });
+  }
 }
-function onWorld(w, tNow) {
+function onWorld(a, w, tNow) {
+  const tg = a.tgt;
   const V = i => new V3(-w[i].x, -w[i].y, -w[i].z);
   const ok = (...ids) => ids.every(i => vis(w[i]) > 0.5);
-  // 肩線 → 側彎＋上半身轉向；髖線 → 整個人轉向
   if (ok(11, 12)) {
     const v = V(12).sub(V(11));
-    tgt.lean = clamp(Math.atan2(v.y, Math.hypot(v.x, v.z)), -0.45, 0.45);
-    tgt.yaw = clamp(Math.atan2(-v.z, v.x), -0.7, 0.7);
+    tg.lean = clamp(Math.atan2(v.y, Math.hypot(v.x, v.z)), -0.45, 0.45);
+    tg.yaw = clamp(Math.atan2(-v.z, v.x), -0.7, 0.7);
   }
-  if (ok(23, 24)) { const v = V(24).sub(V(23)); tgt.hipYaw = clamp(Math.atan2(-v.z, v.x), -0.6, 0.6); }
+  if (ok(23, 24)) { const v = V(24).sub(V(23)); tg.hipYaw = clamp(Math.atan2(-v.z, v.x), -0.6, 0.6); }
   let legs = false;
   SIDES.forEach(s => {
     const I = IDX[s];
     if (ok(I.sh, I.el)) {
-      tgt.upperArm[s] = V(I.el).sub(V(I.sh)).normalize();
-      tgt.foreArm[s] = ok(I.wr) ? V(I.wr).sub(V(I.el)).normalize() : tgt.upperArm[s].clone();
-    } else { tgt.upperArm[s] = restArm(s); tgt.foreArm[s] = restArm(s); }   // 被擋住（例如手在背後）→ 慢慢放下
+      tg.upperArm[s] = V(I.el).sub(V(I.sh)).normalize();
+      tg.foreArm[s] = ok(I.wr) ? V(I.wr).sub(V(I.el)).normalize() : tg.upperArm[s].clone();
+    } else { tg.upperArm[s] = restArm(s); tg.foreArm[s] = restArm(s); }
     if (ok(I.hip, I.kn, I.an)) {
-      tgt.thigh[s] = V(I.kn).sub(V(I.hip)).normalize();
-      tgt.shin[s] = V(I.an).sub(V(I.kn)).normalize();
+      tg.thigh[s] = V(I.kn).sub(V(I.hip)).normalize();
+      tg.shin[s] = V(I.an).sub(V(I.kn)).normalize();
       legs = true;
     }
   });
-  if (legs) lastLegT = tNow;
+  if (legs) a.lastLegT = tNow;
 }
-function onFace(lm, shapes, tNow) {
+function onFace(a, lm, shapes, tNow) {
+  const tg = a.tgt;
   const F = i => ({ x: (1 - lm[i].x) * vAspect, y: lm[i].y });
-  const eR = F(33), eL = F(263), nose = F(1); // 33 = 本人右眼外角 → 鏡像後在畫面右側
+  const eR = F(33), eL = F(263), nose = F(1);
   const dist = Math.hypot(eR.x - eL.x, eR.y - eL.y) || 1;
   const mx = (eR.x + eL.x) / 2, myy = (eR.y + eL.y) / 2;
   const roll = Math.atan2(-(eR.y - eL.y), eR.x - eL.x);
   const yawRaw = (nose.x - mx) / dist, pitchRaw = (nose.y - myy) / dist;
-  if (!calib) {
-    calibBuf.push([yawRaw, pitchRaw]);
-    if (calibBuf.length >= 20) {
-      calib = { yaw: calibBuf.reduce((a, b) => a + b[0], 0) / calibBuf.length, pitch: calibBuf.reduce((a, b) => a + b[1], 0) / calibBuf.length };
-      calibBuf = [];
+  if (!a.calib) {
+    a.calibBuf.push([yawRaw, pitchRaw]);
+    if (a.calibBuf.length >= 20) {
+      a.calib = { yaw: a.calibBuf.reduce((p, b) => p + b[0], 0) / a.calibBuf.length, pitch: a.calibBuf.reduce((p, b) => p + b[1], 0) / a.calibBuf.length };
+      a.calibBuf = [];
     }
   }
-  const c = calib || { yaw: 0, pitch: 0.55 };
-  tgt.hy = clamp((yawRaw - c.yaw) * 2.2, -0.9, 0.9);
-  tgt.hp = clamp((pitchRaw - c.pitch) * 2.6, -0.55, 0.55);
-  tgt.hr = clamp(roll, -0.6, 0.6);
+  const c = a.calib || { yaw: 0, pitch: 0.55 };
+  tg.hy = clamp((yawRaw - c.yaw) * 2.2, -0.9, 0.9);
+  tg.hp = clamp((pitchRaw - c.pitch) * 2.6, -0.55, 0.55);
+  tg.hr = clamp(roll, -0.6, 0.6);
   if (shapes) {
     const get = n => { const f = shapes.find(x => x.categoryName === n); return f ? f.score : 0; };
-    tgt.blink['-1'] = get('eyeBlinkLeft'); tgt.blink['1'] = get('eyeBlinkRight');
-    tgt.jaw = get('jawOpen');
+    tg.blink['-1'] = get('eyeBlinkLeft'); tg.blink['1'] = get('eyeBlinkRight');
+    tg.jaw = get('jawOpen');
   }
-  lastFaceT = tNow;
+  a.lastFaceT = tNow;
+}
+// 把每張臉配給鼻子位置最接近的那個人
+function assignFaces(faceLms, blends, now) {
+  faceLms.forEach((fl, i) => {
+    const nx = 1 - fl[1].x, ny = fl[1].y; let best = null, bd = 0.09;
+    actorList().forEach(a => {
+      if (!a.track || !a.track.det) return;
+      const n = a.track.det.lm[0], d = Math.hypot((1 - n.x) - nx, n.y - ny);
+      if (d < bd) { bd = d; best = a; }
+    });
+    if (best) onFace(best, fl, blends && blends[i] && blends[i].categories, now);
+  });
 }
 
-// 角度限制（在骨頭父層的座標裡，向量預設往下 = 0,-1,0）
 const LIMIT = {
-  upperArm: (v, s) => { if (s * v.x < -0.3) v.x = -0.3 * s; v.z = Math.max(v.z, -0.75); },          // 不穿進身體、不過度往後
-  foreArm: v => { if (v.y > 0.85) v.y = 0.85; },                                                       // 手肘最多彎約 150°
+  upperArm: (v, s) => { if (s * v.x < -0.3) v.x = -0.3 * s; v.z = Math.max(v.z, -0.75); },
+  foreArm: v => { if (v.y > 0.85) v.y = 0.85; },
   thigh: (v, s) => { v.z = clamp(v.z, -0.6, 1.2); if (s * v.x < -0.25) v.x = -0.25 * s; if (s * v.x > 0.8) v.x = 0.8 * s; },
-  shin: v => { v.z = Math.min(v.z, 0.05); if (v.y > 0.6) v.y = 0.6; }                                // 膝蓋只能往後彎
+  shin: v => { v.z = Math.min(v.z, 0.05); if (v.y > 0.6) v.y = 0.6; }
 };
 const _q = new T.Quaternion(), _v = new V3();
 function aimBone(bone, worldDir, limit, s) {
@@ -517,34 +641,30 @@ function smoothDir(curV, tgtV, k) {
   if (curV.lengthSq() < 1e-4) curV.copy(tgtV);
   curV.normalize();
 }
-function applyRig(dt, t) {
-  if (!rig) return;
+function applyRig(a, dt, t) {
+  const rig = a.rig, tgt = a.tgt, cur = a.cur;
   const now = performance.now();
-  const poseFresh = DEMO || now - lastPoseT < 600, faceFresh = DEMO || now - lastFaceT < 600, legFresh = DEMO || now - lastLegT < 600;
-  if (!poseFresh) { Object.assign(tgt, { lean: 0, yaw: 0, hipYaw: 0 }); tgt.sway *= 0.98; SIDES.forEach(s => { tgt.upperArm[s] = restArm(s); tgt.foreArm[s] = restArm(s); }); }
+  const poseFresh = DEMO || now - a.lastPoseT < 600, faceFresh = DEMO || now - a.lastFaceT < 600, legFresh = DEMO || now - a.lastLegT < 600;
+  if (!poseFresh) { Object.assign(tgt, { lean: 0, yaw: 0, hipYaw: 0 }); if (!a.track) tgt.sway = SLOT_X[a.slot]; SIDES.forEach(s => { tgt.upperArm[s] = restArm(s); tgt.foreArm[s] = restArm(s); }); }
   if (!legFresh) SIDES.forEach(s => { tgt.thigh[s] = DOWN.clone(); tgt.shin[s] = DOWN.clone(); });
   if (!faceFresh) { Object.assign(tgt, { hy: 0, hp: 0, hr: 0, jaw: 0 }); tgt.blink['-1'] = 0; tgt.blink['1'] = 0; }
-  const k = Math.min(1, dt * 12), kb = Math.min(1, dt * 25);
-  ['lean', 'yaw', 'hipYaw', 'sway', 'hy', 'hp', 'hr', 'jaw'].forEach(n => cur[n] += (tgt[n] - cur[n]) * k);
+  const k = Math.min(1, dt * 12), kb = Math.min(1, dt * 25), ks = Math.min(1, dt * (poseFresh ? 8 : 2));
+  ['lean', 'yaw', 'hipYaw', 'hy', 'hp', 'hr', 'jaw'].forEach(n => cur[n] += (tgt[n] - cur[n]) * k);
+  cur.sway += (tgt.sway - cur.sway) * ks;
   SIDES.forEach(s => {
     cur.blink[s] += (tgt.blink[s] - cur.blink[s]) * kb;
     ['upperArm', 'foreArm', 'thigh', 'shin'].forEach(b => smoothDir(cur[b][s], tgt[b][s], k));
   });
-
-  // 身體
   rig.root.position.x = cur.sway;
   rig.root.rotation.y = cur.hipYaw * 0.8;
   rig.upper.rotation.set(0, (cur.yaw - cur.hipYaw) * 0.8, cur.lean * 0.8);
   rig.head.rotation.set(cur.hp, cur.hy - cur.yaw * 0.8, cur.hr - cur.lean * 0.8);
   rig.root.updateMatrixWorld(true);
-
-  // 手：肩膀 → 手肘（沒有手肘關節的舊模型就用整隻手的方向）
   SIDES.forEach(s => {
     const hasElbow = rig.elbows && rig.elbows[s];
     aimBone(rig.arms[s], hasElbow ? cur.upperArm[s] : _v.copy(cur.upperArm[s]).add(cur.foreArm[s]).normalize().clone(), LIMIT.upperArm, s);
     if (hasElbow) aimBone(rig.elbows[s], cur.foreArm[s], LIMIT.foreArm, s);
   });
-  // 腳：髖 → 膝蓋，並讓比較低的那隻腳踩在地上
   let footY = Infinity;
   SIDES.forEach(s => {
     if (!(rig.legs && rig.legs[s])) return;
@@ -552,9 +672,7 @@ function applyRig(dt, t) {
     aimBone(rig.knees && rig.knees[s], cur.shin[s], LIMIT.shin, s);
     footY = Math.min(footY, LEN.hip + LEN.thigh * cur.thigh[s].y + LEN.shin * cur.shin[s].y);
   });
-  rig.root.position.y = isFinite(footY) && legFresh ? clamp(-footY, -0.3, 0.05) : Math.sin(t * 2.0) * 0.012;
-
-  // 臉
+  rig.root.position.y = isFinite(footY) && legFresh ? clamp(-footY, -0.3, 0.05) : Math.sin(t * 2.0 + (a.slot === 'R' ? 1.3 : 0)) * 0.012;
   SIDES.forEach(s => {
     const b = cur.blink[s] > 0.45 ? Math.max(0.08, 1 - (cur.blink[s] - 0.45) * 2.5) : 1;
     rig.eyes[s].scale.y = b;
@@ -562,8 +680,39 @@ function applyRig(dt, t) {
   const open = cur.jaw > 0.12;
   rig.mouthOpen.visible = open; rig.mouthIdle.visible = !open;
   if (open) rig.mouthOpen.scale.set(1, clamp(0.4 + cur.jaw * 1.6, 0.4, 1.6), 1);
-  shadow.position.x = cur.sway;
+  a.shadow.position.x = cur.sway;
 }
+
+// ================= 和後端控制台溝通（同一台電腦、同一個瀏覽器） =================
+const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('metabooth-v1') : null;
+let consoleSeen = -1e9, lastFps = 0, camOk = false, trackOk = false;
+function post(m) { try { if (bc) bc.postMessage(m); } catch (e) {} }
+function consoleOnline() { return performance.now() - consoleSeen < 5000; }
+setInterval(() => { const on = consoleOnline(); document.body.classList.toggle('has-console', on); }, 1000);
+function slotInfo(k) {
+  const a = actors[k]; if (!a) return null;
+  return { id: a.S.id, name: a.S.name, bound: !!a.track, x: a.track ? +a.track.x.toFixed(3) : null };
+}
+function postStatus() {
+  post({ type: 'status', t: Date.now(), fps: lastFps, cam: camOk, track: trackOk, demo: DEMO,
+    people: lastDets.filter(d => d.play).length, ignored: lastDets.filter(d => !d.play).length,
+    slots: { L: slotInfo('L'), R: slotInfo('R') }, counting });
+}
+if (bc) bc.onmessage = e => {
+  const m = e.data || {};
+  const wasOnline = consoleOnline(); consoleSeen = performance.now();
+  // 控制台剛連上：把單機模式時已經在台上的人交給控制台登記
+  if (!wasOnline) actorList().forEach(a => post({ type: 'scan', S: a.S, t: Date.now() }));
+  if (m.type === 'state') {
+    if (m.settings) { if (m.settings.zone) settings.zone = m.settings.zone; if (m.settings.minShoulder != null) settings.minShoulder = m.settings.minShoulder; }
+    setSlots(m.slots || {});
+  } else if (m.type === 'rebind') rebindAll();
+  else if (m.type === 'capture') startCountdown();
+  else if (m.type === 'theme') { themeIdx = (themeIdx + 1) % THEMES.length; applyTheme(); }
+  else if (m.type === 'ping') postStatus();
+};
+setInterval(postStatus, 1000);
+post({ type: 'hello' });
 
 // ================= 狀態 / UI =================
 let state = 'idle';
@@ -596,7 +745,8 @@ function star(c, x, y, r, color) {
 function drawOverlay() {
   const W = frameCanvas.width, H = frameCanvas.height, c = fctx;
   c.clearRect(0, 0, W, H);
-  if (!current) return;
+  const list = actorList();
+  if (!list.length) return;
   const th = THEMES[themeIdx], u = H / 100;
   // 外框
   c.lineWidth = 2.6 * u; c.strokeStyle = th.frame;
@@ -617,15 +767,18 @@ function drawOverlay() {
   star(c, W - 15 * u, H - 7 * u, 1.8 * u, '#ffffff');
   star(c, 9 * u, H - 10 * u, 2.4 * u, th.shapes[0]);
   // 名牌
-  const name = current.name || '訪客';
-  c.font = '900 ' + (4.6 * u) + 'px "Noto Sans TC", sans-serif';
-  const tw = Math.min(c.measureText(name).width, W * 0.5), pw = tw + 6 * u, ph = 7.4 * u;
-  c.save(); c.translate(W / 2, H - 9.5 * u); c.rotate(-0.035);
-  roundRect(c, -pw / 2, -ph / 2, pw, ph, ph / 2); c.fillStyle = '#ffd23f'; c.fill();
-  c.lineWidth = 0.5 * u; c.strokeStyle = '#1d1b2a'; c.stroke();
-  c.fillStyle = '#1d1b2a'; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.fillText(name, 0, 0.3 * u, W * 0.5);
-  c.restore();
+  const tags = list.length === 1 ? [[list[0], 0.5]] : [[actors.L, 0.3], [actors.R, 0.7]];
+  tags.forEach(([a, fx], i) => {
+    const name = a.S.name || '訪客';
+    c.font = '900 ' + (4.6 * u) + 'px "Noto Sans TC", sans-serif';
+    const tw = Math.min(c.measureText(name).width, W * 0.32), pw = tw + 6 * u, ph = 7.4 * u;
+    c.save(); c.translate(W * fx, H - 9.5 * u); c.rotate(i % 2 ? 0.035 : -0.035);
+    roundRect(c, -pw / 2, -ph / 2, pw, ph, ph / 2); c.fillStyle = i % 2 ? '#8fd6ff' : '#ffd23f'; c.fill();
+    c.lineWidth = 0.5 * u; c.strokeStyle = '#1d1b2a'; c.stroke();
+    c.fillStyle = '#1d1b2a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(name, 0, 0.3 * u, W * 0.32);
+    c.restore();
+  });
 }
 
 // ================= 拍照 =================
@@ -654,13 +807,15 @@ function capture() {
   const url = out.toDataURL('image/png');
   flash.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => flash.classList.remove('on')));
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-  const fname = 'metabooth_' + (current.id || 'XXXX') + '_' + stamp + '.png';
+  const ids = actorList().map(a => a.S.id);
+  const fname = 'metabooth_' + (ids.join('-') || 'XXXX') + '_' + stamp + '.png';
   try { const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove(); } catch (e) {}
   document.getElementById('shotImg').src = url;
   document.getElementById('shotMsg').textContent = '已存到這台電腦的下載資料夾：' + fname;
   const modal = document.getElementById('shotModal'); modal.hidden = false;
   setTimeout(() => { modal.hidden = true; }, 3800);
-  window.dispatchEvent(new CustomEvent('metabooth:photo', { detail: { dataURL: url, filename: fname, avatar: current } }));
+  post({ type: 'photo', ids, filename: fname, t: Date.now() });
+  window.dispatchEvent(new CustomEvent('metabooth:photo', { detail: { dataURL: url, filename: fname, avatars: actorList().map(a => a.S) } }));
 }
 
 // ================= 鏡頭 / QR 掃描 / MediaPipe =================
@@ -720,6 +875,7 @@ async function startCamera() {
     const tr = stream.getVideoTracks()[0], set = tr.getSettings ? tr.getSettings() : {};
     tuneFocus(tr);
     camIdx = Math.max(0, cams.findIndex(c => c.deviceId === set.deviceId));
+    camOk = true;
     pill('stCam', 'ok', '鏡頭：' + (tr.label || '鏡頭').slice(0, 24) + ' ' + video.videoWidth + '×' + video.videoHeight + (cams.length > 1 ? '（共 ' + cams.length + ' 支，按 V 切換）' : ''));
     showCamHelp(null);
   } catch (e) {
@@ -732,11 +888,11 @@ async function initVision() {
     const fileset = await vision.FilesetResolver.forVisionTasks(MP_BASE + '/wasm');
     const mk = async (Cls, opts, delegate) => Cls.createFromOptions(fileset, Object.assign({ runningMode: 'VIDEO' }, opts, { baseOptions: { modelAssetPath: opts.model, delegate } }));
     const make = async (delegate) => {
-      pose = await mk(vision.PoseLandmarker, { model: POSE_MODEL, numPoses: 1 }, delegate);
-      face = await mk(vision.FaceLandmarker, { model: FACE_MODEL, numFaces: 1, outputFaceBlendshapes: true }, delegate);
+      pose = await mk(vision.PoseLandmarker, { model: POSE_MODEL, numPoses: 3 }, delegate);
+      face = await mk(vision.FaceLandmarker, { model: FACE_MODEL, numFaces: 2, outputFaceBlendshapes: true }, delegate);
     };
-    try { await make('GPU'); pill('stTrack', 'ok', '動補：運作中（GPU）'); }
-    catch (e) { console.warn('GPU 失敗，改用 CPU', e); await make('CPU'); pill('stTrack', 'warn', '動補：運作中（CPU，較慢）'); }
+    try { await make('GPU'); trackOk = true; pill('stTrack', 'ok', '動補：運作中（GPU）'); }
+    catch (e) { console.warn('GPU 失敗，改用 CPU', e); await make('CPU'); trackOk = true; pill('stTrack', 'warn', '動補：運作中（CPU，較慢）'); }
   } catch (e) {
     console.error(e);
     pill('stTrack', 'bad', '動補：載入失敗，請檢查網路');
@@ -758,7 +914,7 @@ function scanQR() {
   const code = jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' });
   if (code && code.data) {
     const S = decodePayload(code.data);
-    if (S) loadAvatar(S);
+    if (S) registerScan(S);
     else if (performance.now() - lastBadToast > 3000) { lastBadToast = performance.now(); toast('這不是 Meta-Booth 的分身票'); }
   }
 }
@@ -772,20 +928,45 @@ function tuneFocus(track) {
     if (Object.keys(adv).length) track.applyConstraints({ advanced: [adv] }).catch(() => {});
   } catch (e) {}
 }
-const POSE_LINKS = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24]];
-function drawSkeleton(poseLm, faceLm) {
-  if (camwrap.hidden) return;
-  const w = skel.width = skel.clientWidth * 1, h = skel.height = skel.clientHeight * 1;
-  sctx.clearRect(0, 0, w, h);
-  // object-fit: cover 換算
+const POSE_LINKS = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+const SLOT_COLOR = { L: '#ff4f7b', R: '#3ee0d0' };
+// 在鏡頭小窗（或傳給控制台的預覽）上畫：遊玩區、每個人的骨架、綁定到哪個角色
+function drawCamOverlay(c, w, h, dets, faces) {
   const va = vAspect, ca = w / h; let sw = w, sh = h, ox = 0, oy = 0;
   if (va > ca) { sw = h * va; ox = (w - sw) / 2; } else { sh = w / va; oy = (h - sh) / 2; }
-  const X = p => ox + p.x * sw, Y = p => oy + p.y * sh;
-  if (poseLm) {
-    sctx.strokeStyle = '#ffd23f'; sctx.lineWidth = 2;
-    POSE_LINKS.forEach(([a, b]) => { sctx.beginPath(); sctx.moveTo(X(poseLm[a]), Y(poseLm[a])); sctx.lineTo(X(poseLm[b]), Y(poseLm[b])); sctx.stroke(); });
-  }
-  if (faceLm) { sctx.fillStyle = '#3ee0d0'; [33, 263, 1, 13, 14].forEach(i => { sctx.beginPath(); sctx.arc(X(faceLm[i]), Y(faceLm[i]), 2.5, 0, PI * 2); sctx.fill(); }); }
+  const X = p => ox + (1 - p.x) * sw, Y = p => oy + p.y * sh;   // 鏡像
+  c.fillStyle = 'rgba(0,0,0,.45)';
+  c.fillRect(0, 0, ox + settings.zone[0] * sw, h);
+  c.fillRect(ox + settings.zone[1] * sw, 0, w - (ox + settings.zone[1] * sw), h);
+  c.font = '700 ' + Math.max(11, Math.round(h / 16)) + 'px "Noto Sans TC", sans-serif'; c.textBaseline = 'bottom';
+  dets.forEach(d => {
+    const a = d.track && d.track.actor;
+    c.strokeStyle = a ? SLOT_COLOR[a.slot] : d.play ? '#ffd23f' : 'rgba(255,255,255,.35)';
+    c.lineWidth = a ? 3 : 1.5;
+    POSE_LINKS.forEach(([i, j]) => { if (vis(d.lm[i]) < 0.4 || vis(d.lm[j]) < 0.4) return; c.beginPath(); c.moveTo(X(d.lm[i]), Y(d.lm[i])); c.lineTo(X(d.lm[j]), Y(d.lm[j])); c.stroke(); });
+    const label = a ? (a.slot === 'L' ? '左 ' : '右 ') + (a.S.name || '') : d.play ? '未綁定' : '忽略';
+    c.fillStyle = c.strokeStyle; c.fillText(label, X(d.lm[0]) - c.measureText(label).width / 2, Y(d.lm[0]) - 8);
+  });
+  if (faces) { c.fillStyle = '#ffffff'; faces.forEach(f => [33, 263, 1].forEach(i => { c.beginPath(); c.arc(X(f[i]), Y(f[i]), 2, 0, PI * 2); c.fill(); })); }
+}
+let lastFaces = [];
+function drawSkeleton() {
+  if (camwrap.hidden) return;
+  const w = skel.width = skel.clientWidth, h = skel.height = skel.clientHeight;
+  sctx.clearRect(0, 0, w, h);
+  if (state !== 'idle') drawCamOverlay(sctx, w, h, lastDets, lastFaces);
+}
+// 給控制台看的鏡頭預覽（每 0.5 秒一張小圖）
+const pvCanvas = document.createElement('canvas'); pvCanvas.width = 384; pvCanvas.height = 216;
+const pvCtx = pvCanvas.getContext('2d');
+let lastPreview = 0;
+function postPreview(now) {
+  if (!consoleOnline() || now - lastPreview < 500 || !video.videoWidth) return;
+  lastPreview = now;
+  const w = pvCanvas.width, h = pvCanvas.height;
+  pvCtx.save(); pvCtx.translate(w, 0); pvCtx.scale(-1, 1); pvCtx.drawImage(video, 0, 0, w, h); pvCtx.restore();
+  drawCamOverlay(pvCtx, w, h, lastDets, lastFaces);
+  post({ type: 'preview', url: pvCanvas.toDataURL('image/jpeg', 0.6) });
 }
 
 // ================= 主迴圈 =================
@@ -808,38 +989,42 @@ function loop() {
   const dt = Math.min(0.1, clock.getDelta()), t = clock.elapsedTime, now = performance.now();
   if (video.readyState >= 2 && video.currentTime !== lastVT) {
     lastVT = video.currentTime;
-    if (state === 'idle') {
-      if (now - lastScan > 150) { lastScan = now; scanQR(); }
-    } else if (pose && face) {
-      let pl = null, fl = null;
+    // 沒人在台上：一直掃 QR；有人在台上：每 0.6 秒掃一次（讓排隊的人也能登記）
+    if (now - lastScan > (state === 'idle' ? 150 : 600)) { lastScan = now; scanQR(); }
+    if (state !== 'idle' && pose && face) {
       try {
         const pr = pose.detectForVideo(video, now);
-        if (pr.landmarks && pr.landmarks[0]) { pl = pr.landmarks[0]; onPose(pl, pr.worldLandmarks && pr.worldLandmarks[0], now); }
+        const dets = (pr.landmarks || []).map((lm, i) => ({ lm, wl: pr.worldLandmarks && pr.worldLandmarks[i], c: detInfo(lm) }));
+        updateTracks(dets, now); lastDets = dets;
+        actorList().forEach(a => { if (a.track && a.track.det) onPose(a, a.track.det.lm, a.track.det.wl, now); });
         const fr = face.detectForVideo(video, now);
-        if (fr.faceLandmarks && fr.faceLandmarks[0]) { fl = fr.faceLandmarks[0]; onFace(fl, fr.faceBlendshapes && fr.faceBlendshapes[0] && fr.faceBlendshapes[0].categories, now); }
+        lastFaces = fr.faceLandmarks || [];
+        assignFaces(lastFaces, fr.faceBlendshapes, now);
       } catch (e) { console.warn(e); }
-      drawSkeleton(pl, fl);
+      drawSkeleton();
     }
+    postPreview(now);
   }
-  if (DEMO && rig) {
-    // 示範動作：右手往前舉起揮手（手肘彎）、左手叉腰、右腳抬膝
-    const a = Math.sin(t * 1.4) * 0.5 + 0.5, k2 = Math.max(0, Math.sin(t * 1.1));
-    tgt.upperArm[1].set(0.5, -0.35 + a * 1.0, 0.65).normalize();
-    tgt.foreArm[1].set(0.15 + Math.sin(t * 6) * 0.45, 1, 0.25).normalize();
-    tgt.upperArm[-1].set(-0.8, -0.6, -0.15).normalize();
-    tgt.foreArm[-1].set(0.75, -0.35, 0.35).normalize();
-    tgt.thigh[1].set(0.05, -1, k2 * 1.5).normalize();
-    tgt.shin[1].set(0, -1, -k2 * 0.15).normalize();
-    tgt.thigh[-1].set(-0.04, -1, 0).normalize(); tgt.shin[-1].copy(DOWN);
-    tgt.hy = Math.sin(t * 0.8) * 0.4; tgt.hr = Math.sin(t * 1.1) * 0.15; tgt.lean = Math.sin(t * 0.9) * 0.1; tgt.yaw = Math.sin(t * 0.5) * 0.3;
-    tgt.blink['-1'] = tgt.blink['1'] = (t % 3) < 0.15 ? 1 : 0; tgt.jaw = Math.max(0, Math.sin(t * 3)) * 0.5;
-  }
-  applyRig(dt, t);
-  shadow.visible = !!rig;
+  if (DEMO) actorList().forEach((a, i) => {
+    // 示範動作：左邊的人揮手、右邊的人抬腳；兩個人慢慢左右走
+    const tg = a.tgt, ph = i * 1.7, aa = Math.sin(t * 1.4 + ph) * 0.5 + 0.5, k2 = Math.max(0, Math.sin(t * 1.1 + ph));
+    const s1 = i ? -1 : 1;
+    tg.upperArm[s1].set(0.5 * s1, -0.35 + aa * 1.0, 0.65).normalize();
+    tg.foreArm[s1].set((0.15 + Math.sin(t * 6) * 0.45) * s1, 1, 0.25).normalize();
+    tg.upperArm[-s1].set(-0.8 * s1, -0.6, -0.15).normalize();
+    tg.foreArm[-s1].set(0.75 * s1, -0.35, 0.35).normalize();
+    tg.thigh[s1].set(0.05 * s1, -1, k2 * 1.5).normalize(); tg.shin[s1].set(0, -1, -k2 * 0.15).normalize();
+    tg.thigh[-s1].set(-0.04 * s1, -1, 0).normalize(); tg.shin[-s1].copy(DOWN);
+    tg.hy = Math.sin(t * 0.8 + ph) * 0.4; tg.hr = Math.sin(t * 1.1 + ph) * 0.15; tg.lean = Math.sin(t * 0.9 + ph) * 0.1; tg.yaw = Math.sin(t * 0.5 + ph) * 0.3;
+    tg.blink['-1'] = tg.blink['1'] = ((t + i) % 3) < 0.15 ? 1 : 0; tg.jaw = Math.max(0, Math.sin(t * 3 + ph)) * 0.5;
+    tg.sway = SLOT_X[a.slot] + Math.sin(t * 0.4 + ph) * 0.35;
+  });
+  actorList().forEach(a => applyRig(a, dt, t));
+  shadow.visible = false;
   deco.children.forEach(m => { m.rotation.x += dt * m.userData.spin; m.rotation.y += dt * m.userData.spin * 0.7; m.position.y += Math.sin(t + m.userData.phase) * 0.0015; });
   renderer.render(scene, camera);
   fpsAcc += dt; fpsN++;
-  if (now - fpsT > 1000) { document.getElementById('stFps').textContent = Math.round(fpsN / fpsAcc) + ' fps'; fpsAcc = 0; fpsN = 0; fpsT = now; }
+  if (now - fpsT > 1000) { lastFps = Math.round(fpsN / fpsAcc); document.getElementById('stFps').textContent = lastFps + ' fps'; fpsAcc = 0; fpsN = 0; fpsT = now; }
 }
 
 // ================= 鍵盤 / 手動輸入 =================
@@ -853,16 +1038,17 @@ document.getElementById('manualForm').addEventListener('submit', e => {
   if (raw.length === 13) { id = raw.slice(0, 4).toUpperCase(); p = raw.slice(4); }
   const S = paramsToState(p.toLowerCase());
   if (!S) { codeErr.hidden = false; return; }
-  S.id = id; S.name = nameInput2.value.trim();
-  manual.hidden = true; loadAvatar(S);
+  S.id = id; S.name = nameInput2.value.trim(); S.params = p.toLowerCase();
+  manual.hidden = true; registerScan(S);
 });
 window.addEventListener('keydown', e => {
   if (!manual.hidden) { if (e.key === 'Escape') manual.hidden = true; return; }
   const k = e.key;
   if (k === ' ' || k === 'Enter' || k === 'PageDown' || k === 'ArrowRight' || k === 'PageUp' || k === 'ArrowLeft') { e.preventDefault(); startCountdown(); }
-  else if (k === 'n' || k === 'N' || k === 'Escape') unloadAvatar();
+  else if (k === 'n' || k === 'N' || k === 'Escape') clearStage();
+  else if (k === 'r' || k === 'R') rebindAll();
   else if (k === 'b' || k === 'B') { themeIdx = (themeIdx + 1) % THEMES.length; applyTheme(); toast('背景：' + THEMES[themeIdx].name); }
-  else if (k === 'k' || k === 'K') { calib = null; calibBuf = []; toast('頭部校正中，請正視螢幕'); }
+  else if (k === 'k' || k === 'K') { actorList().forEach(a => { a.calib = null; a.calibBuf = []; }); toast('頭部校正中，請正視螢幕'); }
   else if (k === 'd' || k === 'D') { showCamSmall = !showCamSmall; if (state !== 'idle') camwrap.hidden = !showCamSmall; }
   else if (k === 'c' || k === 'C') openManual();
   else if (k === 'v' || k === 'V') { if (cams.length > 1) { camIdx = (camIdx + 1) % cams.length; startCamera(); } else toast('只偵測到一支鏡頭'); }
@@ -871,7 +1057,7 @@ window.addEventListener('keydown', e => {
 });
 
 // ================= 啟動 =================
-window.metaBooth = { camera, get rig() { return rig; }, load: t => { const S = decodePayload(t); if (S) loadAvatar(S); return !!S; }, decode: decodePayload, capture: startCountdown };
+window.metaBooth = { camera, actors, get tracks() { return tracks; }, scan: t => { const S = decodePayload(t); if (S) registerScan(S); return !!S; }, decode: decodePayload, capture: startCountdown, setSlots };
 resize(); applyTheme(); setState('idle'); loop();
 
 // ---- 載入分身模型（metabooth_avatar.glb 放在這個網頁旁邊；也可以直接把 .glb 拖進視窗）
@@ -879,7 +1065,7 @@ function modelLoaded(parts, label) {
   const miss = parts.pivots.length ? '（缺少軸心：' + parts.pivots.join('、') + '）' : '';
   toast('模型已載入：' + label + miss);
   console.log('[Meta-Booth] 模型零件', parts);
-  if (current) loadAvatar(current);
+  rebuildActors();
 }
 if (window.AvatarLib && THREE.GLTFLoader) {
   AvatarLib.load('metabooth_avatar.glb').then(p => modelLoaded(p, 'metabooth_avatar.glb'))
@@ -895,9 +1081,10 @@ window.addEventListener('drop', e => {
 });
 if (DEMO) {
   pill('stCam', 'warn', '鏡頭：示範模式'); pill('stTrack', 'warn', '動補：示範動作');
-  const S = paramsToState(params.get('demo') || '') || paramsToState('000001144');
-  S.id = 'DEMO'; S.name = '示範分身';
-  loadAvatar(S);
+  const p1 = paramsToState(params.get('demo') || '') ? params.get('demo') : '000001144';
+  const S1 = Object.assign(paramsToState(p1), { id: 'DEM1', name: '示範左', params: p1 });
+  const S2 = Object.assign(paramsToState('342011320'), { id: 'DEM2', name: '示範右', params: '342011320' });
+  setSlots(params.has('one') ? { L: S1 } : { L: S1, R: S2 });
 } else {
   document.getElementById('camRetry').addEventListener('click', () => { cams = []; camIdx = 0; startCamera(); });
   if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', () => { if (!stream || !stream.active) startCamera(); });
