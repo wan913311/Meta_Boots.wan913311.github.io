@@ -1,0 +1,8 @@
+# WebStorm 個人設定
+.idea/workspace.xml
+.idea/shelf/
+# 系統檔
+.DS_Store
+Thumbs.db
+# Blender 自動備份
+*.blend1

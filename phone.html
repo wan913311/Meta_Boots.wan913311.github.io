@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Meta-Booth 捏分身</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: phone-first booth — 3D 預覽舞台在上、零件面板在下、底部固定操作列；寬螢幕改左右兩欄 */
+:root {
+  --bg: #eceee9;
+  --surface: #ffffff;
+  --ink: #1d1b2a;
+  --muted: #676476;
+  --line: #d6d8d0;
+  --accent: #ff4f7b;
+  --accent-ink: #ffffff;
+  --pop: #ffd23f;
+  --stage: #e2e5f0;
+  --stage-dot: #cfd3e4;
+  --ticket: #ffffff;
+  --ticket-ink: #1d1b2a;
+  --f-display: "Rubik Mono One", "Noto Sans TC", system-ui, sans-serif;
+  --f-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15141c; --surface: #1f1d29; --ink: #f2f0f7; --muted: #a29eb0; --line: #353240;
+    --accent: #ff6b90; --accent-ink: #1a0f14; --pop: #ffd23f; --stage: #232130; --stage-dot: #2f2c3f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15141c; --surface: #1f1d29; --ink: #f2f0f7; --muted: #a29eb0; --line: #353240;
+  --accent: #ff6b90; --accent-ink: #1a0f14; --pop: #ffd23f; --stage: #232130; --stage-dot: #2f2c3f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55; }
+.app {
+  max-width: 1080px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px 120px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.logo { font-family: var(--f-display); font-size: 18px; letter-spacing: .02em; display: flex; align-items: center; gap: 8px; }
+.logo i { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); display: inline-block; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.step { font-size: 12px; color: var(--muted); letter-spacing: .08em; }
+.step b { color: var(--ink); }
+
+/* editor grid */
+.editor { display: grid; gap: 14px; }
+@media (min-width: 860px) {
+  .editor { grid-template-columns: 1.05fr 1fr; align-items: start; }
+  .stage-wrap { position: sticky; top: calc(14px + env(safe-area-inset-top, 0px)); }
+  .stage { aspect-ratio: 4 / 5; max-height: calc(100vh - 140px); }
+}
+.stage {
+  position: relative; width: 100%; max-width: 100%; aspect-ratio: 1 / 1; max-height: 52vh;
+  border-radius: 20px; overflow: hidden; touch-action: none; cursor: grab;
+  background-color: var(--stage);
+  background-image: radial-gradient(var(--stage-dot) 1.4px, transparent 1.6px);
+  background-size: 16px 16px;
+  border: 1px solid var(--line);
+}
+.stage:active { cursor: grabbing; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; filter: contrast(1.08) saturate(.9) sepia(.08); }
+.vf { position: absolute; width: 22px; height: 22px; border: 2.5px solid var(--ink); opacity: .55; pointer-events: none; }
+.vf.tl { top: 12px; left: 12px; border-right: 0; border-bottom: 0; }
+.vf.tr { top: 12px; right: 12px; border-left: 0; border-bottom: 0; }
+.vf.bl { bottom: 12px; left: 12px; border-right: 0; border-top: 0; }
+.vf.br { bottom: 12px; right: 12px; border-left: 0; border-top: 0; }
+.rec { position: absolute; top: 14px; left: 44px; font-family: var(--f-mono); font-size: 11px; color: var(--muted); pointer-events: none; display: flex; gap: 6px; align-items: center; }
+.rec::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.hint { position: absolute; top: 14px; right: 44px; font-size: 11px; color: var(--muted); pointer-events: none; }
+.nametag {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%) rotate(-2deg);
+  background: var(--pop); color: #1d1b2a; font-weight: 900; font-size: 17px;
+  padding: 4px 14px; border-radius: 999px; border: 2px solid #1d1b2a;
+  max-width: 80%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.nametag.empty { background: var(--surface); color: var(--muted); font-weight: 500; border-style: dashed; border-color: var(--muted); }
+
+/* panel */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; min-width: 0; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs button {
+  flex: 1 0 auto; min-width: 64px; background: none; border: 0; padding: 13px 12px 11px; font: inherit; font-weight: 700; font-size: 15px;
+  color: var(--muted); border-bottom: 3px solid transparent; cursor: pointer;
+}
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.pane { padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+.group { display: flex; flex-direction: column; gap: 9px; }
+.glabel { font-size: 12px; color: var(--muted); letter-spacing: .12em; font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); background: var(--bg);
+  border: 1.5px solid var(--line); border-radius: 999px; padding: 7px 15px; cursor: pointer;
+  transition: transform .12s, border-color .12s, background .12s;
+}
+.chip:hover { border-color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.sw {
+  width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0;
+  box-shadow: inset 0 -4px 0 rgba(0,0,0,.12);
+}
+.sw[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: 3px; border-color: transparent; }
+button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field input {
+  font: inherit; font-size: 18px; font-weight: 700; padding: 12px 14px; border-radius: 12px;
+  border: 1.5px solid var(--line); background: var(--bg); color: var(--ink); width: 100%;
+}
+.field small { color: var(--muted); font-size: 12px; }
+.err { color: var(--accent); font-size: 13px; font-weight: 700; }
+
+/* bottom bar */
+.bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line);
+  padding-top: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.bar-in { max-width: 1080px; margin: 0 auto; display: flex; gap: 10px; }
+.btn {
+  font: inherit; font-weight: 900; font-size: 16px; border-radius: 14px; padding: 14px 18px; cursor: pointer;
+  border: 2px solid var(--ink); background: var(--surface); color: var(--ink);
+}
+.btn.primary { flex: 1; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:active { transform: translateY(1px); }
+
+/* result */
+.result { display: flex; flex-direction: column; gap: 18px; align-items: center; }
+.result h1 { font-size: 26px; font-weight: 900; margin: 6px 0 0; text-wrap: balance; text-align: center; }
+.result .sub { color: var(--muted); margin: -10px 0 0; text-align: center; }
+.ticket {
+  width: 100%; max-width: 380px; background: var(--ticket); color: var(--ticket-ink);
+  border-radius: 22px; overflow: hidden; border: 2px solid #1d1b2a;
+  box-shadow: 6px 6px 0 #1d1b2a;
+}
+.ticket .shot { background-color: #e2e5f0; background-image: radial-gradient(#cfd3e4 1.4px, transparent 1.6px); background-size: 14px 14px; position: relative; aspect-ratio: 1/1; }
+.ticket .shot img { width: 100%; height: 100%; object-fit: cover; display: block; image-rendering: pixelated; }
+.ticket .no { position: absolute; top: 10px; left: 12px; font-family: var(--f-mono); font-size: 12px; background: #1d1b2a; color: #fff; padding: 2px 8px; border-radius: 6px; }
+.ticket .tname { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%) rotate(-2deg); background: #ffd23f; border: 2px solid #1d1b2a; border-radius: 999px; padding: 3px 14px; font-weight: 900; font-size: 18px; white-space: nowrap; max-width: 85%; overflow: hidden; text-overflow: ellipsis; }
+.perf { border-top: 2px dashed #1d1b2a; position: relative; }
+.ticket .qrrow { display: flex; flex-direction: column; gap: 12px; padding: 18px 16px; align-items: center; text-align: center; }
+.ticket .qrrow img { width: min(240px, 70vw); height: auto; aspect-ratio: 1; image-rendering: pixelated; flex: none; cursor: zoom-in; }
+.ticket .qrtext { align-items: center; }
+.ticket .code { align-self: center !important; }
+.qrfull { position: fixed; inset: 0; z-index: 20; background: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; color: #1d1b2a; cursor: zoom-out; }
+.qrfull img { width: min(92vw, 70vh); height: auto; image-rendering: pixelated; }
+.qrfull p { margin: 0; font-weight: 900; font-size: 18px; text-align: center; }
+.qrfull small { color: #5c596b; }
+.ticket .qrtext { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ticket .qrtext b { font-size: 15px; line-height: 1.4; }
+.ticket .code { font-family: var(--f-mono); font-size: 13px; letter-spacing: .08em; background: #eef0f6; padding: 4px 8px; border-radius: 6px; align-self: flex-start; }
+.ticket .qrtext small { color: #5c596b; font-size: 12px; }
+.howto { width: 100%; max-width: 380px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; counter-reset: s; }
+.howto li { display: flex; gap: 12px; align-items: baseline; counter-increment: s; }
+.howto li::before { content: counter(s); font-family: var(--f-display); font-size: 13px; width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: var(--bg); }
+details.dev { width: 100%; max-width: 560px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+details.dev summary { cursor: pointer; font-weight: 700; font-size: 14px; }
+details.dev p { color: var(--muted); font-size: 13px; margin: 10px 0 6px; }
+details.dev pre { font-family: var(--f-mono); font-size: 12px; background: var(--bg); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 0; white-space: pre; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="logo"><i></i>META-BOOTH</div>
+    <div class="step" id="stepLabel"><b>STEP 1</b> / 2　捏你的分身</div>
+  </header>
+
+  <section class="editor" id="editor">
+    <div class="stage-wrap">
+      <div class="stage" id="stage" aria-label="分身 3D 預覽，可左右拖曳旋轉">
+        <span class="vf tl"></span><span class="vf tr"></span><span class="vf bl"></span><span class="vf br"></span>
+        <span class="rec">PREVIEW</span>
+        <span class="hint">左右拖曳旋轉</span>
+        <div class="nametag empty" id="nametag">還沒取名字</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div id="panes"></div>
+    </div>
+  </section>
+
+  <section class="result" id="result" hidden>
+    <h1>分身完成，等你上台！</h1>
+    <p class="sub">這張票就是你的分身，排到你的時候打開它</p>
+    <div class="ticket">
+      <div class="shot">
+        <img id="shot" alt="你的分身正面">
+        <span class="no" id="ticketNo">No. ----</span>
+        <span class="tname" id="ticketName"></span>
+      </div>
+      <div class="perf"></div>
+      <div class="qrrow">
+        <img id="qr" alt="分身 QR Code，點一下放大">
+        <div class="qrtext">
+          <b>上台時點 QR 放大，對著棚內鏡頭</b>
+          <span class="code" id="shortCode">------</span>
+          <small>鏡頭掃不到時，把這組代碼念給工作人員</small>
+        </div>
+      </div>
+    </div>
+    <ol class="howto">
+      <li>排到你時，打開這頁（可以先截圖存起來）</li>
+      <li>站到綠棚前，點 QR 放成全螢幕，對準鏡頭</li>
+      <li>大螢幕出現你的分身，開始擺姿勢、倒數拍照</li>
+    </ol>
+    <details class="dev">
+      <summary>主控端讀取格式（開發組看）</summary>
+      <p>QR 內容就是全部資料，不用連網路。主控端掃到後依編號從預載零件組合分身。</p>
+      <pre id="payloadOut"></pre>
+      <p>解出來的參數：</p>
+      <pre id="jsonOut"></pre>
+    </details>
+  </section>
+</div>
+
+<div class="qrfull" id="qrFull" hidden role="dialog" aria-label="放大的分身 QR">
+  <p>把螢幕對著鏡頭，距離大約 20～40 公分</p>
+  <img id="qrBig" alt="分身 QR Code">
+  <small>把手機亮度調到最高 · 點一下關閉</small>
+</div>
+
+<div class="bar">
+  <div class="bar-in" id="barEdit">
+    <button class="btn" id="randBtn" type="button">隨機</button>
+    <button class="btn primary" id="doneBtn" type="button">完成分身</button>
+  </div>
+  <div class="bar-in" id="barResult" hidden>
+    <button class="btn primary" id="backBtn" type="button">回去修改</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+/* Meta-Booth 分身零件庫載入器（手機捏臉頁與主控台共用）
+ * 讀 metabooth_avatar.glb → 依參數顯示零件、換色 → 回傳可驅動的骨架
+ * 需要：THREE (r128) 與 THREE.GLTFLoader
+ */
+window.AvatarLib = (function () {
+  const T = THREE;
+  let template = null;
+  const PALETTE = {
+    hairColor: ['#2b2230', '#6b4a3a', '#d9a55b', '#e86a8e', '#6fa8dc', '#ecebe6'],
+    skin: ['#fde3cf', '#f3c9a5', '#d9a07a', '#a8714f', '#6e4631'],
+    outfitColor: ['#f2f2ee', '#ff5c7a', '#ffc93c', '#3ec7a6', '#4a7bf7', '#2e2a3a']
+  };
+  const matCache = {};
+
+  // 老引擎感：全部換成逐頂點打光的 Lambert、貼圖不平滑
+  function retroMaterial(old) {
+    if (matCache[old.name]) return matCache[old.name];
+    const m = new T.MeshLambertMaterial({
+      name: old.name, color: old.color.clone(), map: old.map || null,
+      emissive: old.emissive ? old.emissive.clone() : new T.Color(0), emissiveMap: old.emissiveMap || null,
+      alphaTest: old.alphaTest || 0, transparent: false, side: T.DoubleSide
+    });
+    if (m.map) { m.map.magFilter = T.NearestFilter; m.map.minFilter = T.NearestFilter; m.map.generateMipmaps = false; m.map.needsUpdate = true; }
+    matCache[old.name] = m;
+    return m;
+  }
+
+  function prepare(scene) {
+    scene.traverse(o => {
+      if (o.isMesh) {
+        o.material = Array.isArray(o.material) ? o.material.map(retroMaterial) : retroMaterial(o.material);
+        o.frustumCulled = false;
+      }
+    });
+    return scene;
+  }
+
+  function load(source) {
+    return new Promise((resolve, reject) => {
+      const loader = new T.GLTFLoader();
+      const done = g => { template = prepare(g.scene); resolve(listParts()); };
+      if (source instanceof ArrayBuffer) loader.parse(source, '', done, reject);
+      else loader.load(source, done, undefined, reject);
+    });
+  }
+
+  // 列出模型裡有哪些零件，方便檢查命名
+  function listParts() {
+    const found = {};
+    template.traverse(o => {
+      const m = /^(hair|eyes|mouth|blush|outfit|acc)_([0-9]+|open)/.exec(o.name);
+      if (m) { (found[m[1]] = found[m[1]] || new Set()).add(m[2]); }
+    });
+    const out = {};
+    Object.keys(found).forEach(k => { out[k] = [...found[k]].sort(); });
+    out.pivots = ['ROOT', 'PIVOT_Upper', 'PIVOT_Head', 'PIVOT_Arm_L', 'PIVOT_Arm_R', 'PIVOT_Eye_L', 'PIVOT_Eye_R', 'PIVOT_Mouth']
+      .filter(n => !template.getObjectByName(n));
+    return out;  // pivots = 缺少的軸心
+  }
+
+  function partVisible(name, S) {
+    let m;
+    if ((m = /^hair_(\d+)/.exec(name))) return +m[1] === S.hair;
+    if ((m = /^eyes_(\d+)/.exec(name))) return +m[1] === S.eyes;
+    if (/^mouth_open/.test(name)) return false;
+    if ((m = /^mouth_(\d+)/.exec(name))) return +m[1] === S.mouth;
+    if ((m = /^blush_(\d+)/.exec(name))) return +m[1] === S.blush;
+    if ((m = /^outfit_(\d+)/.exec(name))) return +m[1] === S.outfit;
+    if ((m = /^acc_(\d+)/.exec(name))) return +m[1] === S.acc;
+    return true;
+  }
+
+  function tint(S) {
+    const set = (prefix, hex) => Object.values(matCache).forEach(m => {
+      if (m.name.indexOf(prefix) === 0) m.color.setStyle(hex).convertSRGBToLinear();
+    });
+    set('TINT_HAIR', PALETTE.hairColor[S.hairColor]);
+    set('TINT_SKIN', PALETTE.skin[S.skin]);
+    set('TINT_OUTFIT', PALETTE.outfitColor[S.outfitColor]);
+  }
+
+  // 回傳和主控台一樣的骨架介面：root / upper / head / arms{1:左,-1:右} / eyes / mouthIdle / mouthOpen
+  function make(S) {
+    if (!template) return null;
+    const clone = template.clone(true);
+    clone.traverse(o => { if (o !== clone) o.visible = partVisible(o.name, S); });
+    tint(S);
+    const g = n => clone.getObjectByName(n);
+    const root = new T.Group(); root.add(clone);
+    const mouthIdle = g('mouth_' + S.mouth) || new T.Group();
+    const mouthOpen = g('mouth_open') || new T.Group();
+    return {
+      root, upper: g('PIVOT_Upper') || new T.Group(), head: g('PIVOT_Head') || new T.Group(),
+      arms: { 1: g('PIVOT_Arm_L') || new T.Group(), '-1': g('PIVOT_Arm_R') || new T.Group() },
+      eyes: { 1: g('PIVOT_Eye_L') || new T.Group(), '-1': g('PIVOT_Eye_R') || new T.Group() },
+      mouthIdle, mouthOpen, fromGLB: true
+    };
+  }
+
+  return { load, make, listParts, get ready() { return !!template; } };
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+(function () {
+  // ---------- 零件清單（之後換成 VRoid 零件時，保持同樣的編號順序即可） ----------
+  const HAIR = ['短髮', '雙馬尾', '刺蝟頭', '鮑伯頭', '丸子頭'];
+  const HAIR_COLORS = ['#2b2230', '#6b4a3a', '#d9a55b', '#e86a8e', '#6fa8dc', '#ecebe6'];
+  const SKIN = ['#fde3cf', '#f3c9a5', '#d9a07a', '#a8714f', '#6e4631'];
+  const EYES = ['圓眼', '笑眼', '睏睏眼', '星星眼'];
+  const MOUTH = ['微笑', '張嘴', '貓嘴'];
+  const BLUSH = ['不要', '要'];
+  const OUTFIT = ['T恤', '帽T', '洋裝', '制服'];
+  const OUTFIT_COLORS = ['#f2f2ee', '#ff5c7a', '#ffc93c', '#3ec7a6', '#4a7bf7', '#2e2a3a'];
+  const ACC = ['無', '眼鏡', '貓耳', '皇冠', '耳機', '光環'];
+  const KEYS = ['hair', 'hairColor', 'skin', 'eyes', 'mouth', 'blush', 'outfit', 'outfitColor', 'acc'];
+  const LISTS = { hair: HAIR, hairColor: HAIR_COLORS, skin: SKIN, eyes: EYES, mouth: MOUTH, blush: BLUSH, outfit: OUTFIT, outfitColor: OUTFIT_COLORS, acc: ACC };
+
+  const S = { hair: 0, hairColor: 0, skin: 0, eyes: 0, mouth: 0, blush: 1, outfit: 1, outfitColor: 4, acc: 4, name: '' };
+
+  const TABS = [
+    { id: 'hair', label: '髮型', groups: [{ key: 'hair', label: '款式' }, { key: 'hairColor', label: '髮色', swatch: true }] },
+    { id: 'face', label: '臉', groups: [{ key: 'skin', label: '膚色', swatch: true }, { key: 'eyes', label: '眼睛' }, { key: 'mouth', label: '嘴巴' }, { key: 'blush', label: '腮紅' }] },
+    { id: 'outfit', label: '服裝', groups: [{ key: 'outfit', label: '款式' }, { key: 'outfitColor', label: '顏色', swatch: true }] },
+    { id: 'acc', label: '配件', groups: [{ key: 'acc', label: '頭上戴什麼' }] },
+    { id: 'name', label: '名字', name: true }
+  ];
+
+  // ---------- UI ----------
+  const tabsEl = document.getElementById('tabs');
+  const panesEl = document.getElementById('panes');
+  const nametag = document.getElementById('nametag');
+  let activeTab = 'hair';
+
+  TABS.forEach(t => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.role = 'tab'; b.id = 'tab-' + t.id; b.textContent = t.label;
+    b.setAttribute('aria-selected', t.id === activeTab);
+    b.addEventListener('click', () => showTab(t.id));
+    tabsEl.appendChild(b);
+
+    const pane = document.createElement('div');
+    pane.className = 'pane'; pane.id = 'pane-' + t.id; pane.role = 'tabpanel';
+    pane.hidden = t.id !== activeTab;
+    if (t.name) {
+      pane.innerHTML = '<div class="field"><label class="glabel" for="nameInput">分身的名字</label>' +
+        '<input id="nameInput" maxlength="10" autocomplete="off" placeholder="例如：阿擇">' +
+        '<small>會顯示在大螢幕和拍貼上，最多 10 個字</small><span class="err" id="nameErr" hidden>先幫分身取個名字，才能完成喔</span></div>';
+    } else {
+      t.groups.forEach(g => {
+        const wrap = document.createElement('div'); wrap.className = 'group';
+        wrap.innerHTML = '<div class="glabel">' + g.label + '</div>';
+        const row = document.createElement('div'); row.className = g.swatch ? 'swatches' : 'chips';
+        LISTS[g.key].forEach((v, i) => {
+          const o = document.createElement('button');
+          o.type = 'button'; o.id = 'opt-' + g.key + '-' + i;
+          o.dataset.key = g.key; o.dataset.i = i;
+          if (g.swatch) { o.className = 'sw'; o.style.background = v; o.setAttribute('aria-label', g.label + ' ' + (i + 1)); }
+          else { o.className = 'chip'; o.textContent = v; }
+          o.addEventListener('click', () => { S[g.key] = i; sync(); });
+          row.appendChild(o);
+        });
+        wrap.appendChild(row); pane.appendChild(wrap);
+      });
+    }
+    panesEl.appendChild(pane);
+  });
+
+  const nameInput = document.getElementById('nameInput');
+  const nameErr = document.getElementById('nameErr');
+  nameInput.addEventListener('input', () => { S.name = nameInput.value.trim(); nameErr.hidden = true; syncName(); });
+
+  function showTab(id) {
+    activeTab = id;
+    TABS.forEach(t => {
+      document.getElementById('tab-' + t.id).setAttribute('aria-selected', t.id === id);
+      document.getElementById('pane-' + t.id).hidden = t.id !== id;
+    });
+  }
+  function syncName() {
+    nametag.textContent = S.name || '還沒取名字';
+    nametag.classList.toggle('empty', !S.name);
+  }
+  function sync() {
+    document.querySelectorAll('[data-key]').forEach(el => {
+      el.setAttribute('aria-pressed', S[el.dataset.key] === +el.dataset.i);
+    });
+    rebuild();
+  }
+
+  // ---------- 3D ----------
+  const T = THREE;
+  const stage = document.getElementById('stage');
+  const renderer = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(0.5);   // 老引擎感：半解析度再放大成像素
+  renderer.outputEncoding = T.sRGBEncoding;
+  stage.prepend(renderer.domElement);
+  const scene = new T.Scene();
+  const camera = new T.PerspectiveCamera(28, 1, 0.1, 50);
+  camera.position.set(0, 1.25, 6.2);
+  camera.lookAt(0, 1.0, 0);
+  scene.add(new T.HemisphereLight(0xfff4ea, 0x5a5670, 0.6));
+  const sun = new T.DirectionalLight(0xfff0dd, 1.05); sun.position.set(3, 4, 3); scene.add(sun);
+  const rim = new T.DirectionalLight(0xffe2ec, 0.35); rim.position.set(-3, 2, -3); scene.add(rim);
+  const shadow = new T.Mesh(new T.CircleGeometry(0.62, 24), new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.13 }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.002; scene.add(shadow);
+
+  let avatar = null;
+  const D = T.DoubleSide, PI = Math.PI;
+  const DARK = '#2b2230';
+
+  function buildAvatar() {
+    const g = new T.Group();
+    const skin = SKIN[S.skin], hc = HAIR_COLORS[S.hairColor], oc = OUTFIT_COLORS[S.outfitColor];
+    function m(geo, color, p, o) {
+      o = o || {};
+      const mat = new T.MeshStandardMaterial(Object.assign({ color, flatShading: true, roughness: 0.75, metalness: 0 }, o.mat || {}));
+      const me = new T.Mesh(geo, mat);
+      me.position.set(p[0], p[1], p[2]);
+      if (o.rot) me.rotation.set(o.rot[0], o.rot[1], o.rot[2]);
+      if (o.scale) me.scale.set(o.scale[0], o.scale[1], o.scale[2]);
+      g.add(me); return me;
+    }
+    const HY = 1.5;
+    const outfit = S.outfit;
+
+    // 腿與鞋
+    const legColor = outfit === 2 ? skin : '#3a3346';
+    [-1, 1].forEach(s => {
+      m(new T.CylinderGeometry(0.13, 0.13, 0.36, 6), legColor, [s * 0.15, 0.22, 0]);
+      m(new T.BoxGeometry(0.2, 0.1, 0.3), DARK, [s * 0.15, 0.05, 0.04]);
+    });
+    // 身體
+    if (outfit === 2) {
+      m(new T.CylinderGeometry(0.3, 0.36, 0.46, 7), oc, [0, 0.78, 0]);
+      m(new T.CylinderGeometry(0.34, 0.64, 0.46, 8), oc, [0, 0.42, 0]);
+      m(new T.TorusGeometry(0.335, 0.03, 4, 14), '#ffffff', [0, 0.62, 0], { rot: [PI / 2, 0, 0] });
+    } else {
+      m(new T.CylinderGeometry(0.32, 0.42, 0.62, 7), oc, [0, 0.69, 0]);
+    }
+    // 手臂
+    [-1, 1].forEach(s => {
+      m(new T.CylinderGeometry(0.095, 0.11, 0.46, 6), oc, [s * 0.47, 0.74, 0], { rot: [0, 0, s * 0.42] });
+      m(new T.SphereGeometry(0.1, 7, 5), skin, [s * 0.57, 0.52, 0]);
+    });
+    if (outfit === 0) {
+      m(new T.OctahedronGeometry(0.08), '#ffd23f', [0.13, 0.8, 0.36], { scale: [1, 1, 0.35] });
+    } else if (outfit === 1) {
+      m(new T.TorusGeometry(0.27, 0.1, 5, 10), oc, [0, 1.0, -0.06], { rot: [PI / 2, 0, 0] });
+      m(new T.BoxGeometry(0.42, 0.15, 0.05), shade(oc, -0.12), [0, 0.55, 0.38], { rot: [-0.16, 0, 0] });
+      [-1, 1].forEach(s => m(new T.CylinderGeometry(0.012, 0.012, 0.2, 4), '#ffffff', [s * 0.08, 0.86, 0.35]));
+    } else if (outfit === 3) {
+      m(new T.BoxGeometry(0.2, 0.42, 0.04), '#ffffff', [0, 0.78, 0.34], { rot: [-0.16, 0, 0] });
+      m(new T.BoxGeometry(0.07, 0.32, 0.03), '#d6304f', [0, 0.76, 0.37], { rot: [-0.16, 0, 0] });
+    }
+
+    // 頭
+    m(new T.IcosahedronGeometry(0.62, 1), skin, [0, HY, 0], { scale: [1, 0.92, 0.95] });
+
+    // 臉
+    const ey = HY - 0.02, ez = 0.53;
+    [-1, 1].forEach(s => {
+      const x = s * 0.22;
+      if (S.eyes === 0) {
+        m(new T.SphereGeometry(0.08, 8, 6), DARK, [x, ey, ez], { scale: [1, 1.15, 0.5] });
+        m(new T.SphereGeometry(0.025, 6, 4), '#ffffff', [x + 0.025, ey + 0.035, ez + 0.045]);
+      } else if (S.eyes === 1) {
+        m(new T.TorusGeometry(0.07, 0.022, 4, 10, PI), DARK, [x, ey - 0.03, ez + 0.01]);
+      } else if (S.eyes === 2) {
+        m(new T.BoxGeometry(0.15, 0.03, 0.03), DARK, [x, ey - 0.02, ez + 0.01], { rot: [0, 0, -s * 0.12] });
+      } else {
+        m(new T.OctahedronGeometry(0.1), '#ffb703', [x, ey, ez], { scale: [0.8, 1.2, 0.35], mat: { emissive: '#7a4d00' } });
+        m(new T.SphereGeometry(0.022, 6, 4), '#ffffff', [x + 0.02, ey + 0.04, ez + 0.04]);
+      }
+    });
+    const my = HY - 0.2, mz = 0.55;
+    if (S.mouth === 0) m(new T.TorusGeometry(0.07, 0.02, 4, 10, PI), DARK, [0, my + 0.04, mz], { rot: [0, 0, PI] });
+    else if (S.mouth === 1) m(new T.SphereGeometry(0.065, 8, 6), '#b23a48', [0, my, mz], { scale: [1, 0.85, 0.4] });
+    else [-1, 1].forEach(s => m(new T.TorusGeometry(0.04, 0.016, 4, 8, PI), DARK, [s * 0.04, my + 0.03, mz], { rot: [0, 0, PI] }));
+    if (S.blush) [-1, 1].forEach(s => m(new T.SphereGeometry(0.09, 8, 6), '#ff8fa3', [s * 0.36, HY - 0.12, 0.45], { rot: [0, s * 0.55, 0], scale: [1, 0.55, 0.3], mat: { transparent: true, opacity: 0.75 } }));
+
+    // 頭髮
+    const hm = { side: D };
+    m(new T.SphereGeometry(0.67, 10, 7, 0, PI * 2, 0, PI * 0.42), hc, [0, HY, 0], { scale: [1, 0.94, 1], mat: hm });
+    if (S.hair === 3) {
+      m(new T.SphereGeometry(0.7, 12, 8, PI * 0.78, PI * 1.44, 0, PI * 0.72), hc, [0, HY, 0], { scale: [1, 0.95, 1], mat: hm });
+    } else {
+      m(new T.SphereGeometry(0.68, 10, 7, PI * 0.85, PI * 1.3, 0, PI * 0.58), hc, [0, HY, 0], { scale: [1, 0.94, 1], mat: hm });
+    }
+    if (S.hair !== 2) {
+      [-0.2, 0, 0.2].forEach((x, i) => m(new T.ConeGeometry(0.11, 0.22, 4), hc, [x, HY + 0.3 - (i === 1 ? 0.02 : 0), 0.5], { rot: [PI - 0.35, 0, 0] }));
+    }
+    if (S.hair === 1) {
+      [-1, 1].forEach(s => {
+        m(new T.SphereGeometry(0.09, 6, 4), '#ff4f7b', [s * 0.62, HY + 0.12, -0.1]);
+        m(new T.ConeGeometry(0.17, 0.62, 6), hc, [s * 0.78, HY - 0.2, -0.12], { rot: [0, 0, PI + s * 0.3] });
+      });
+    } else if (S.hair === 2) {
+      const up = new T.Vector3(0, 1, 0);
+      for (let i = 0; i < 8; i++) {
+        const th = i === 0 ? 0 : 0.75, ph = (i / 7) * PI * 2;
+        const d = new T.Vector3(Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph) * 0.9 - (i === 0 ? 0 : 0.1)).normalize();
+        const c = m(new T.ConeGeometry(0.14, 0.38, 5), hc, [d.x * 0.6, HY + d.y * 0.56, d.z * 0.6]);
+        c.quaternion.setFromUnitVectors(up, d);
+      }
+    } else if (S.hair === 4) {
+      m(new T.SphereGeometry(0.25, 8, 6), hc, [0, HY + 0.62, -0.15]);
+      m(new T.TorusGeometry(0.15, 0.035, 4, 12), '#ff4f7b', [0, HY + 0.5, -0.1], { rot: [PI / 2 - 0.3, 0, 0] });
+    }
+
+    // 配件
+    const A = S.acc;
+    if (A === 1) {
+      [-1, 1].forEach(s => m(new T.TorusGeometry(0.11, 0.02, 4, 14), DARK, [s * 0.22, ey, 0.6]));
+      m(new T.BoxGeometry(0.12, 0.022, 0.022), DARK, [0, ey + 0.02, 0.6]);
+    } else if (A === 2) {
+      [-1, 1].forEach(s => {
+        m(new T.ConeGeometry(0.17, 0.3, 4), hc, [s * 0.32, HY + 0.55, 0], { rot: [0, 0, -s * 0.4] });
+        m(new T.ConeGeometry(0.09, 0.17, 4), '#ff8fa3', [s * 0.33, HY + 0.53, 0.07], { rot: [0, 0, -s * 0.4] });
+      });
+    } else if (A === 3) {
+      m(new T.CylinderGeometry(0.24, 0.24, 0.14, 8, 1, true), '#ffc93c', [0, HY + 0.62, 0], { mat: { side: D, metalness: 0.3, roughness: 0.4 } });
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * PI * 2 + PI / 2;
+        m(new T.ConeGeometry(0.055, 0.15, 4), '#ffc93c', [Math.cos(a) * 0.24, HY + 0.76, Math.sin(a) * 0.24]);
+      }
+      m(new T.OctahedronGeometry(0.05), '#ff4f7b', [0, HY + 0.62, 0.25]);
+    } else if (A === 4) {
+      m(new T.TorusGeometry(0.69, 0.045, 5, 18, PI), '#ff4f7b', [0, HY, 0]);
+      [-1, 1].forEach(s => m(new T.CylinderGeometry(0.16, 0.16, 0.13, 10), '#ff4f7b', [s * 0.66, HY, 0], { rot: [0, 0, PI / 2] }));
+    } else if (A === 5) {
+      m(new T.TorusGeometry(0.3, 0.04, 5, 20), '#ffd23f', [0, HY + 0.95, 0], { rot: [PI / 2, 0, 0], mat: { emissive: '#ffb703', emissiveIntensity: 0.6 } });
+    }
+    return g;
+  }
+
+  function shade(hex, amt) {
+    const c = new T.Color(hex); const hsl = {}; c.getHSL(hsl);
+    c.setHSL(hsl.h, hsl.s, Math.max(0, Math.min(1, hsl.l + amt)));
+    return '#' + c.getHexString();
+  }
+  function disposeGroup(grp) {
+    grp.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  }
+  function rebuild() {
+    const rotY = avatar ? avatar.rotation.y : 0;
+    if (avatar) { scene.remove(avatar); if (!avatar.userData.glb) disposeGroup(avatar); }
+    if (window.AvatarLib && AvatarLib.ready) {
+      const r = AvatarLib.make(S);
+      r.arms[1].rotation.z = 0.42; r.arms[-1].rotation.z = -0.42;
+      avatar = r.root; avatar.userData.glb = true;
+    } else avatar = buildAvatar();
+    avatar.rotation.y = rotY; scene.add(avatar);
+  }
+
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    renderer.setSize(r.width, r.height, false);
+    camera.aspect = r.width / r.height;
+    camera.fov = camera.aspect < 0.9 ? 32 : 28;
+    camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(resize).observe(stage);
+
+  // 拖曳旋轉
+  let dragging = false, lastX = 0, userRot = 0, vel = 0;
+  stage.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; stage.setPointerCapture(e.pointerId); });
+  stage.addEventListener('pointermove', e => { if (!dragging) return; const dx = e.clientX - lastX; lastX = e.clientX; userRot += dx * 0.012; vel = dx * 0.012; });
+  const endDrag = () => { dragging = false; };
+  stage.addEventListener('pointerup', endDrag); stage.addEventListener('pointercancel', endDrag);
+
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clock = new T.Clock();
+  let running = true;
+  function loop() {
+    if (!running) return;
+    requestAnimationFrame(loop);
+    const t = clock.getElapsedTime();
+    if (!dragging) { userRot += vel; vel *= 0.92; }
+    if (avatar) {
+      avatar.rotation.y = userRot + (reduce ? 0 : Math.sin(t * 0.7) * 0.25);
+      avatar.position.y = reduce ? 0 : Math.abs(Math.sin(t * 2.2)) * 0.05;
+      shadow.scale.setScalar(1 - avatar.position.y * 1.5);
+    }
+    renderer.render(scene, camera);
+  }
+
+  // ---------- 編碼：QR 內容 = MB1-參數-編號-名字(base64url) ----------
+  function b64url(str) {
+    const bytes = new TextEncoder().encode(str); let bin = '';
+    bytes.forEach(b => bin += String.fromCharCode(b));
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function makeId() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = '';
+    for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+  function encode(id) {
+    const params = KEYS.map(k => S[k].toString(36)).join('');
+    return { params, payload: 'MB1-' + params + '-' + id + '-' + b64url(S.name) };
+  }
+
+  // ---------- 動作 ----------
+  const editor = document.getElementById('editor'), result = document.getElementById('result');
+  const barEdit = document.getElementById('barEdit'), barResult = document.getElementById('barResult');
+  const stepLabel = document.getElementById('stepLabel');
+
+  document.getElementById('randBtn').addEventListener('click', () => {
+    KEYS.forEach(k => { S[k] = Math.floor(Math.random() * LISTS[k].length); });
+    sync();
+  });
+
+  document.getElementById('doneBtn').addEventListener('click', () => {
+    if (!S.name) { showTab('name'); nameErr.hidden = false; nameInput.focus(); return; }
+    // 正面截圖
+    const saveRot = avatar.rotation.y, saveY = avatar.position.y;
+    avatar.rotation.y = 0.18; avatar.position.y = 0; shadow.scale.setScalar(1);
+    renderer.render(scene, camera);
+    document.getElementById('shot').src = renderer.domElement.toDataURL('image/png');
+    avatar.rotation.y = saveRot; avatar.position.y = saveY;
+
+    const id = makeId();
+    const enc = encode(id);
+    const qr = qrcode(0, 'L'); qr.addData(enc.payload); qr.make();   // L 級：格子最少、最好掃
+    document.getElementById('qr').src = qr.createDataURL(10, 4);
+    document.getElementById('ticketNo').textContent = 'No. ' + id;
+    document.getElementById('ticketName').textContent = S.name;
+    document.getElementById('shortCode').textContent = id + ' · ' + enc.params.toUpperCase();
+    document.getElementById('payloadOut').textContent = enc.payload;
+    const out = { version: 1, id, name: S.name };
+    KEYS.forEach(k => { out[k] = { index: S[k], label: LISTS[k][S[k]] }; });
+    document.getElementById('jsonOut').textContent = JSON.stringify(out, null, 2);
+
+    running = false;
+    editor.hidden = true; barEdit.hidden = true; result.hidden = false; barResult.hidden = false;
+    stepLabel.innerHTML = '<b>STEP 2</b> / 2　你的分身票';
+    window.scrollTo(0, 0);
+  });
+
+  const qrFull = document.getElementById('qrFull');
+  document.getElementById('qr').addEventListener('click', () => {
+    document.getElementById('qrBig').src = document.getElementById('qr').src; qrFull.hidden = false;
+    if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
+  });
+  qrFull.addEventListener('click', () => { qrFull.hidden = true; });
+
+  document.getElementById('backBtn').addEventListener('click', () => {
+    result.hidden = true; barResult.hidden = true; editor.hidden = false; barEdit.hidden = false;
+    stepLabel.innerHTML = '<b>STEP 1</b> / 2　捏你的分身';
+    running = true; clock.getDelta(); requestAnimationFrame(() => { resize(); loop(); });
+  });
+
+  sync(); syncName(); resize(); loop();
+  function modelSource() {
+    if (!window.MB_GLB_B64) return 'metabooth_avatar.glb';
+    const bin = atob(window.MB_GLB_B64), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return u8.buffer;
+  }
+  if (window.AvatarLib && THREE.GLTFLoader) AvatarLib.load(modelSource()).then(() => rebuild()).catch(e => console.warn('模型載入失敗，使用內建模型', e));
+})();
+</script>
+
+</body>
+</html>
