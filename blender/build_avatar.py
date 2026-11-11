@@ -295,13 +295,24 @@ def build():
     eyep = {s: empty('PIVOT_Eye_' + ('L' if s > 0 else 'R'), W(s * 0.22, HY - 0.02, 0.565), head) for s in (1, -1)}
     mouthp = empty('PIVOT_Mouth', W(0, HY - 0.2, 0.565), head)
     LR = lambda s: 'L' if s > 0 else 'R'
+    # 關節：手肘在手臂一半、髖關節在腰下、膝蓋在腿一半（長度和 v1 相同）
+    ELBOW_Y, HIP_Y, KNEE_Y = 0.72, 0.40, 0.24
+    elbow = {s: empty('PIVOT_Elbow_' + LR(s), W(s * 0.376, ELBOW_Y, 0), arm[s]) for s in (1, -1)}
+    leg = {s: empty('PIVOT_Leg_' + LR(s), W(s * 0.15, HIP_Y, 0), root) for s in (1, -1)}
+    knee = {s: empty('PIVOT_Knee_' + LR(s), W(s * 0.15, KNEE_Y, 0), leg[s]) for s in (1, -1)}
 
     # ---- body（每個人都有）
     for s in (1, -1):
-        prim('cyl', 'body_leg_' + LR(s), '01_body', 'TINT_SKIN', root, (s * 0.15, 0.24, 0), vertices=7, radius=0.115, depth=0.34)
-        prim('cube', 'body_shoe_' + LR(s), '01_body', 'SHOES_leather', root, (s * 0.15, 0.055, 0.04), scale=(0.105, 0.16, 0.055))
-        prim('cyl', 'body_arm_' + LR(s), '01_body', 'TINT_SKIN', arm[s], (s * 0.376, 0.72, 0), vertices=6, radius=0.075, depth=0.42)
-        prim('ico', 'body_hand_' + LR(s), '01_body', 'TINT_SKIN', arm[s], (s * 0.376, 0.49, 0), subdivisions=1, radius=0.1, scale=(1, 1.1, 0.9))
+        x = s * 0.15
+        prim('cyl', 'body_thigh_' + LR(s), '01_body', 'TINT_SKIN', leg[s], (x, 0.32, 0), vertices=7, radius=0.115, depth=0.19)
+        prim('sphere', 'body_knee_' + LR(s), '01_body', 'TINT_SKIN', knee[s], (x, KNEE_Y, 0), segments=7, ring_count=5, radius=0.112)
+        prim('cyl', 'body_shin_' + LR(s), '01_body', 'TINT_SKIN', knee[s], (x, 0.155, 0), vertices=7, radius=0.11, depth=0.19)
+        prim('cube', 'body_shoe_' + LR(s), '01_body', 'SHOES_leather', knee[s], (x, 0.055, 0.04), scale=(0.105, 0.16, 0.055))
+        ax = s * 0.376
+        prim('cyl', 'body_upperarm_' + LR(s), '01_body', 'TINT_SKIN', arm[s], (ax, 0.835, 0), vertices=6, radius=0.078, depth=0.24)
+        prim('sphere', 'body_elbow_' + LR(s), '01_body', 'TINT_SKIN', elbow[s], (ax, ELBOW_Y, 0), segments=6, ring_count=4, radius=0.077)
+        prim('cyl', 'body_forearm_' + LR(s), '01_body', 'TINT_SKIN', elbow[s], (ax, 0.615, 0), vertices=6, radius=0.074, depth=0.22)
+        prim('ico', 'body_hand_' + LR(s), '01_body', 'TINT_SKIN', elbow[s], (ax, 0.49, 0), subdivisions=1, radius=0.1, scale=(1, 1.1, 0.9))
         prim('sphere', 'body_ear_' + LR(s), '01_body', 'TINT_SKIN', head, (s * 0.6, HY - 0.05, 0), segments=6, ring_count=4, radius=0.1, scale=(0.5, 0.8, 1))
     prim('cyl', 'body_neck', '01_body', 'TINT_SKIN', upper, (0, 1.02, 0), vertices=7, radius=0.12, depth=0.14)
     prim('sphere', 'body_head', '01_body', 'TINT_SKIN', head, (0, HY, 0), segments=16, ring_count=10, radius=0.62, scale=(1, 0.95, 0.92))
@@ -358,11 +369,24 @@ def build():
         for v in o.data.vertices:
             if v.co.z > 0: v.co.x *= top / bot; v.co.y *= top / bot
     def sleeves(prefix, mat, length):
+        # 袖子在手肘切成兩段：上段跟肩膀、下段跟手肘，接縫用一顆球蓋住
+        top, bot = 0.95, 0.95 - length
         for s in (1, -1):
-            prim('cyl', '%s_arm_%s' % (prefix, LR(s)), '05_outfit', mat, arm[s], (s * 0.376, 0.95 - length / 2 - 0.01, 0), vertices=7, radius=0.108, depth=length)
+            ax = s * 0.376
+            ub = max(bot, ELBOW_Y - 0.01)
+            prim('cyl', '%s_arm_%s' % (prefix, LR(s)), '05_outfit', mat, arm[s], (ax, (top + ub) / 2 - 0.01, 0), vertices=7, radius=0.108, depth=top - ub)
+            if bot < ELBOW_Y - 0.02:
+                prim('sphere', '%s_elbow_%s' % (prefix, LR(s)), '05_outfit', mat, elbow[s], (ax, ELBOW_Y, 0), segments=7, ring_count=5, radius=0.106)
+                prim('cyl', '%s_forearm_%s' % (prefix, LR(s)), '05_outfit', mat, elbow[s], (ax, (ELBOW_Y + bot) / 2, 0), vertices=7, radius=0.104, depth=ELBOW_Y - bot)
     def pants(prefix, mat, length=0.24):
+        bot = HIP_Y - length
         for s in (1, -1):
-            prim('cyl', '%s_lower_%s' % (prefix, LR(s)), '05_outfit', mat, root, (s * 0.15, 0.40 - length / 2, 0), vertices=7, radius=0.135, depth=length)
+            x = s * 0.15
+            ub = max(bot, KNEE_Y - 0.01)
+            prim('cyl', '%s_lower_%s' % (prefix, LR(s)), '05_outfit', mat, leg[s], (x, (HIP_Y + 0.02 + ub) / 2, 0), vertices=7, radius=0.135, depth=HIP_Y + 0.02 - ub)
+            if bot < KNEE_Y - 0.02:
+                prim('sphere', '%s_lower_knee_%s' % (prefix, LR(s)), '05_outfit', mat, knee[s], (x, KNEE_Y, 0), segments=7, ring_count=5, radius=0.133)
+                prim('cyl', '%s_lower_shin_%s' % (prefix, LR(s)), '05_outfit', mat, knee[s], (x, (KNEE_Y + bot) / 2, 0), vertices=7, radius=0.13, depth=KNEE_Y - bot)
         prim('cyl', prefix + '_lower_hip', '05_outfit', mat, root, (0, 0.40, 0), vertices=8, radius=0.37, depth=0.08)
 
     # 0 T恤 + 牛仔短褲
@@ -378,7 +402,7 @@ def build():
     prim('cone', 'outfit_2_lower_skirt', '05_outfit', 'TINT_OUTFIT_cotton', root, (0, 0.42, 0), vertices=10, radius1=0.64, radius2=0.33, depth=0.46)
     prim('torus', 'outfit_2_collar', '05_outfit', 'STRING_white', upper, (0, 1.0, 0), major_segments=10, minor_segments=4, major_radius=0.25, minor_radius=0.04)
     for s in (1, -1):
-        prim('cyl', 'outfit_2_lower_sock_' + LR(s), '05_outfit', 'SOCKS_white', root, (s * 0.15, 0.17, 0), vertices=7, radius=0.125, depth=0.16)
+        prim('cyl', 'outfit_2_lower_sock_' + LR(s), '05_outfit', 'SOCKS_white', knee[s], (s * 0.15, 0.15, 0), vertices=7, radius=0.125, depth=0.16)
     # 3 制服：白襯衫 + 蝴蝶結 + 綁腰針織衫 + 格子褶裙 + 泡泡襪
     torso('outfit_3', 'SHIRT_white'); sleeves('outfit_3', 'SHIRT_white', 0.4)
     prim('cone', 'outfit_3_lower_skirt', '05_outfit', 'TINT_OUTFIT_plaid', root, (0, 0.36, 0), vertices=12, radius1=0.56, radius2=0.38, depth=0.32)
@@ -388,7 +412,7 @@ def build():
             a = math.atan2(v.co.y, v.co.x); k = 1.0 + 0.08 * math.cos(a * 12)
             v.co.x *= k; v.co.y *= k
     for s in (1, -1):
-        prim('cone', 'outfit_3_lower_sock_' + LR(s), '05_outfit', 'SOCKS_white', root, (s * 0.15, 0.17, 0), vertices=8, radius1=0.16, radius2=0.13, depth=0.2)
+        prim('cone', 'outfit_3_lower_sock_' + LR(s), '05_outfit', 'SOCKS_white', knee[s], (s * 0.15, 0.15, 0), vertices=8, radius1=0.16, radius2=0.13, depth=0.2)
     prim('torus', 'outfit_3_sweater', '05_outfit', 'KNIT_tan', upper, (0, 0.44, 0.0), major_segments=10, minor_segments=5, major_radius=0.39, minor_radius=0.07)
     for s in (1, -1):
         prim('cube', 'outfit_3_sweaterarm_' + LR(s), '05_outfit', 'KNIT_tan', upper, (s * 0.12, 0.3, 0.38), rot=(0.15, 0, s * 0.35), scale=(0.07, 0.04, 0.18))

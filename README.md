@@ -18,6 +18,10 @@
 用 WebStorm 開 `index.html` → 右上角瀏覽器圖示（會用 localhost 開，鏡頭才能用）。
 直接雙擊開檔時讀不到 .glb，會改用內建模型；可以把 .glb 拖進視窗。
 
+## 動作捕捉
+
+用 MediaPipe Pose 的 3D 座標（worldLandmarks）驅動肩、肘、髖、膝，可以前後左右擺動。腳要拍到全身（人離鏡頭約 2.5～3 公尺）才會動，拍不到就站好不動。網址加 `?demo` 可以看示範動作。
+
 ## 主控台按鍵
 
 空白 / → 拍照 · 雙手舉高 1 秒拍照 · N 下一位 · B 換背景 · K 頭部校正 · V 換鏡頭 · D 鏡頭小窗 · C 輸入代碼 · P 像素顆粒 · F 全螢幕
@@ -25,6 +29,8 @@
 ## 模型零件命名規則
 
 - 軸心：`ROOT` / `PIVOT_Upper` / `PIVOT_Head` / `PIVOT_Arm_L|R` / `PIVOT_Eye_L|R` / `PIVOT_Mouth`
+- 關節：`PIVOT_Arm` > `PIVOT_Elbow_L|R`（手肘）；`ROOT` > `PIVOT_Leg_L|R`（髖）> `PIVOT_Knee_L|R`（膝蓋）
+- 手腳在模型裡要「直直往下」擺放；_L = 角色左手邊 = Blender +X
 - 零件：`hair_0~4`、`eyes_0~3_L|R`、`mouth_0~2`、`mouth_open`、`blush_1`、`outfit_0~3_*`、`acc_1~5`
 - 可換色材質：`TINT_HAIR`、`TINT_SKIN`、`TINT_OUTFIT*`
 - 匯出：glTF Binary (.glb)、+Y Up、匯出全部物件

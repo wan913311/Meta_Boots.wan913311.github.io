@@ -1,6 +1,7 @@
 /* Meta-Booth 分身零件庫載入器（手機捏臉頁與主控台共用）
  * 讀 metabooth_avatar.glb → 依參數顯示零件、換色 → 回傳可驅動的骨架
  * 需要：THREE (r128) 與 THREE.GLTFLoader
+ * 骨架：ROOT > PIVOT_Upper > PIVOT_Arm > PIVOT_Elbow；ROOT > PIVOT_Leg > PIVOT_Knee；PIVOT_Upper > PIVOT_Head
  */
 window.AvatarLib = (function () {
   const T = THREE;
@@ -53,7 +54,8 @@ window.AvatarLib = (function () {
     });
     const out = {};
     Object.keys(found).forEach(k => { out[k] = [...found[k]].sort(); });
-    out.pivots = ['ROOT', 'PIVOT_Upper', 'PIVOT_Head', 'PIVOT_Arm_L', 'PIVOT_Arm_R', 'PIVOT_Eye_L', 'PIVOT_Eye_R', 'PIVOT_Mouth']
+    out.pivots = ['ROOT', 'PIVOT_Upper', 'PIVOT_Head', 'PIVOT_Arm_L', 'PIVOT_Arm_R', 'PIVOT_Elbow_L', 'PIVOT_Elbow_R',
+      'PIVOT_Leg_L', 'PIVOT_Leg_R', 'PIVOT_Knee_L', 'PIVOT_Knee_R', 'PIVOT_Eye_L', 'PIVOT_Eye_R', 'PIVOT_Mouth']
       .filter(n => !template.getObjectByName(n));
     return out;  // pivots = 缺少的軸心
   }
@@ -93,6 +95,10 @@ window.AvatarLib = (function () {
       root, upper: g('PIVOT_Upper') || new T.Group(), head: g('PIVOT_Head') || new T.Group(),
       arms: { 1: g('PIVOT_Arm_L') || new T.Group(), '-1': g('PIVOT_Arm_R') || new T.Group() },
       eyes: { 1: g('PIVOT_Eye_L') || new T.Group(), '-1': g('PIVOT_Eye_R') || new T.Group() },
+      // 新版模型才有的關節（舊模型為 null，主控台會自動略過）
+      elbows: g('PIVOT_Elbow_L') ? { 1: g('PIVOT_Elbow_L'), '-1': g('PIVOT_Elbow_R') } : null,
+      legs: g('PIVOT_Leg_L') ? { 1: g('PIVOT_Leg_L'), '-1': g('PIVOT_Leg_R') } : null,
+      knees: g('PIVOT_Knee_L') ? { 1: g('PIVOT_Knee_L'), '-1': g('PIVOT_Knee_R') } : null,
       mouthIdle, mouthOpen, fromGLB: true
     };
   }
