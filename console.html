@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meta-Booth 控制台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* 控制台：第二螢幕用。左欄 = 舞台（兩個位置＋鏡頭＋設定），右欄 = 等待區，下方 = 全部紀錄 */
+:root {
+  --bg: #eceef2; --surface: #ffffff; --sunk: #f5f6f8; --ink: #1b1a24; --muted: #676577; --line: #d9dbe2;
+  --accent: #ff4f7b; --slotL: #ff4f7b; --slotR: #12a99a; --ok: #1f9d5b; --warn: #c98a00; --bad: #d93a4a;
+  --f-display: "Rubik Mono One", "Noto Sans TC", system-ui, sans-serif;
+  --f-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #121119; --surface: #1c1b26; --sunk: #161520; --ink: #f1eff7; --muted: #a19eb2; --line: #312f3e; --slotR: #3ee0d0; --ok: #4fd18b; --warn: #f2c14e; --bad: #ff6b78; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #121119; --surface: #1c1b26; --sunk: #161520; --ink: #f1eff7; --muted: #a19eb2; --line: #312f3e; --slotR: #3ee0d0; --ok: #4fd18b; --warn: #f2c14e; --bad: #ff6b78; color-scheme: dark; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.5; }
+button { font: inherit; }
+.wrap { max-width: 1500px; margin: 0 auto; padding: 14px max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 14px; }
+
+header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.logo { font-family: var(--f-display); font-size: 17px; display: flex; gap: 8px; align-items: center; }
+.logo i { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); }
+.logo small { font-family: var(--f-body); font-weight: 700; font-size: 14px; color: var(--muted); }
+.pills { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 12.5px; white-space: nowrap; }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill.ok i { background: var(--ok); } .pill.warn i { background: var(--warn); } .pill.bad i { background: var(--bad); }
+.btn { border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; padding: 7px 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.L { border-color: var(--slotL); color: var(--slotL); } .btn.R { border-color: var(--slotR); color: var(--slotR); }
+.btn.danger { color: var(--bad); }
+.btn.danger.armed { background: var(--bad); color: #fff; border-color: var(--bad); }
+.btn:disabled { opacity: .4; cursor: default; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.card h2 .count { font-family: var(--f-mono); font-size: 12px; background: var(--sunk); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
+.card h2 .spacer { flex: 1; }
+
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .slots { grid-template-columns: 1fr; } }
+.slot { border: 2px solid var(--line); border-radius: 14px; padding: 12px; display: grid; grid-template-columns: 88px 1fr; gap: 12px; background: var(--sunk); min-height: 138px; }
+.slot.L.filled { border-color: var(--slotL); } .slot.R.filled { border-color: var(--slotR); }
+.slot .tag { font-weight: 900; font-size: 12px; letter-spacing: .1em; }
+.slot.L .tag { color: var(--slotL); } .slot.R .tag { color: var(--slotR); }
+.slot .info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.slot .name { font-size: 19px; font-weight: 900; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot .meta { font-family: var(--f-mono); font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
+.slot .acts { display: flex; gap: 6px; margin-top: auto; flex-wrap: wrap; }
+.slot.empty { grid-template-columns: 1fr; place-items: center; text-align: center; color: var(--muted); }
+.thumb { width: 88px; height: 88px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); image-rendering: pixelated; object-fit: cover; display: grid; place-items: center; font-weight: 900; font-size: 26px; color: var(--muted); }
+.thumb.sm { width: 52px; height: 52px; font-size: 18px; border-radius: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 1px 8px; align-self: flex-start; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.chip.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.chip.idle { color: var(--muted); background: var(--surface); }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.cam { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16/9; max-width: 100%; }
+.cam img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cam .none { position: absolute; inset: 0; display: grid; place-items: center; color: #aaa; font-size: 13px; text-align: center; padding: 16px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 18px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 12px; font-weight: 700; color: var(--muted); display: flex; justify-content: space-between; }
+.field label output { font-family: var(--f-mono); color: var(--ink); }
+.field input[type=range] { width: 100%; accent-color: var(--accent); }
+.field small { color: var(--muted); font-size: 11.5px; }
+.toggle { display: flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; }
+.toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+.queue { display: flex; flex-direction: column; gap: 8px; max-height: 640px; overflow-y: auto; }
+.qi { display: grid; grid-template-columns: 22px 52px 1fr auto; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--sunk); }
+.qi .n { font-family: var(--f-mono); font-weight: 700; color: var(--muted); text-align: center; }
+.qi .nm { font-weight: 900; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qi .sub { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
+.qi .acts { display: flex; gap: 5px; }
+.qi .acts .btn { padding: 5px 9px; }
+.empty-note { color: var(--muted); text-align: center; padding: 22px 10px; border: 1.5px dashed var(--line); border-radius: 12px; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat { background: var(--sunk); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.stat b { display: block; font-family: var(--f-mono); font-size: 22px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 12px; color: var(--muted); }
+.tablebar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tablebar input { font: inherit; padding: 7px 10px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--sunk); color: var(--ink); min-width: 0; flex: 1; max-width: 280px; }
+.tbl { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.mono { font-family: var(--f-mono); font-size: 12px; }
+.st { font-weight: 700; font-size: 12px; }
+.st.waiting { color: var(--warn); } .st.onstage { color: var(--slotL); } .st.done { color: var(--ok); } .st.skipped { color: var(--muted); }
+.log { font-family: var(--f-mono); font-size: 12px; color: var(--muted); max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><i></i>META-BOOTH <small>後端控制台</small></div>
+    <div class="pills">
+      <span class="pill bad" id="pStage"><i></i>舞台：未連線</span>
+      <span class="pill" id="pCam"><i></i>鏡頭：—</span>
+      <span class="pill" id="pTrack"><i></i>動補：—</span>
+      <span class="pill" id="pPeople"><i></i>畫面中：—</span>
+    </div>
+    <button class="btn" id="exportBtn" type="button">匯出紀錄 CSV</button>
+    <button class="btn" id="exportPosBtn" type="button">匯出走動紀錄 CSV</button>
+  </header>
+
+  <div class="grid">
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+      <section class="card">
+        <h2>舞台<span class="spacer"></span>
+          <label class="toggle"><input type="checkbox" id="autoStage">有空位就自動叫下一位</label>
+        </h2>
+        <div class="slots" id="slots"></div>
+        <div class="controls">
+          <button class="btn primary" id="capBtn" type="button">倒數拍照</button>
+          <button class="btn" id="rebindBtn" type="button">重新綁定（認錯人時按）</button>
+          <button class="btn" id="themeBtn" type="button">換背景</button>
+          <button class="btn" id="clearStageBtn" type="button">全部完成、清空舞台</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>舞台鏡頭畫面</h2>
+        <div class="cam"><img id="camImg" alt="舞台鏡頭即時畫面" hidden><div class="none" id="camNone">舞台頁面還沒連線，或還沒有人上台。<br>舞台頁面要開在這台電腦的同一個瀏覽器裡。</div></div>
+        <div class="legend">
+          <span style="--c: var(--slotL)">綁定左邊角色</span>
+          <span style="--c: var(--slotR)">綁定右邊角色</span>
+          <span style="--c: #ffd23f">在遊玩區、還沒綁定</span>
+          <span style="--c: #8a8a8a">遊玩區外或太遠（忽略）</span>
+        </div>
+        <div class="settings">
+          <div class="field">
+            <label for="zoneL">遊玩區左邊界 <output id="zoneLOut"></output></label>
+            <input type="range" id="zoneL" min="0" max="45" step="1">
+            <small>畫面暗掉的部分不會被當成玩家</small>
+          </div>
+          <div class="field">
+            <label for="zoneR">遊玩區右邊界 <output id="zoneROut"></output></label>
+            <input type="range" id="zoneR" min="55" max="100" step="1">
+          </div>
+          <div class="field">
+            <label for="minSh">太遠的人不抓 <output id="minShOut"></output></label>
+            <input type="range" id="minSh" min="2" max="20" step="1">
+            <small>數字越大，越要站近才會被抓到（擋掉後面排隊的人）</small>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>等待區 <span class="count" id="qCount">0</span></h2>
+      <div class="queue" id="queue"></div>
+      <h2 style="margin-top:6px">最近動態</h2>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>全部紀錄</h2>
+    <div class="stats" id="stats"></div>
+    <div class="tablebar">
+      <input id="search" type="search" placeholder="搜尋名字或編號" autocomplete="off">
+      <span style="flex:1"></span>
+      <button class="btn danger" id="wipeBtn" type="button">清除全部資料</button>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>編號</th><th>名字</th><th>造型</th><th>登記時間</th><th>狀態</th><th>上台次數</th><th>台上時間</th><th>拍照</th><th>走動紀錄</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="avatar-lib.js"></script>
+<script>
+(function () {
+'use strict';
+// ---------------- 零件清單（和手機捏臉頁、舞台一致）
+const LISTS = {
+  hair: ['短髮', '雙馬尾', '刺蝟頭', '鮑伯頭', '丸子頭'], hairColor: [0, 1, 2, 3, 4, 5], skin: [0, 1, 2, 3, 4],
+  eyes: ['圓眼', '笑眼', '睏睏眼', '星星眼'], mouth: ['微笑', '張嘴', '貓嘴'], blush: [0, 1],
+  outfit: ['T恤', '帽T', '洋裝', '制服'], outfitColor: [0, 1, 2, 3, 4, 5], acc: ['無', '眼鏡', '貓耳', '皇冠', '耳機', '光環']
+};
+const KEYS = ['hair', 'hairColor', 'skin', 'eyes', 'mouth', 'blush', 'outfit', 'outfitColor', 'acc'];
+function stateFrom(p) {
+  if (!/^[0-9a-z]{9}$/.test(p.params || '')) return null;
+  const S = { id: p.id, name: p.name, params: p.params };
+  KEYS.forEach((k, i) => { S[k] = parseInt(p.params[i], 36); });
+  return S;
+}
+function lookText(p) {
+  const S = stateFrom(p); if (!S) return '—';
+  return [LISTS.hair[S.hair], LISTS.outfit[S.outfit], S.acc ? LISTS.acc[S.acc] : ''].filter(Boolean).join('・');
+}
+
+// ---------------- 資料（存在這台電腦的瀏覽器裡）
+const STORE_KEY = 'metabooth_console_v1';
+function fresh() { return { people: {}, queue: [], slots: { L: null, R: null }, settings: { zone: [0.06, 0.94], minShoulder: 0.07, autoStage: true }, log: [] }; }
+let db;
+try { db = JSON.parse(localStorage.getItem(STORE_KEY)) || fresh(); } catch (e) { db = fresh(); }
+db = Object.assign(fresh(), db);
+let saveTimer = 0;
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch (e) { addLog('⚠ 存檔失敗：瀏覽器空間不足'); } }, 250); }
+function addLog(text) { db.log.push([Date.now(), text]); if (db.log.length > 300) db.log.splice(0, db.log.length - 300); }
+const now = () => Date.now();
+
+// ---------------- 和舞台溝通
+const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('metabooth-v1') : null;
+let stage = null, stageAt = 0, previewAt = 0;
+function post(m) { if (bc) bc.postMessage(m); }
+function sendState() {
+  post({ type: 'state', slots: { L: db.slots.L ? stateFrom(db.people[db.slots.L]) : null, R: db.slots.R ? stateFrom(db.people[db.slots.R]) : null },
+    settings: { zone: db.settings.zone, minShoulder: db.settings.minShoulder } });
+}
+if (bc) bc.onmessage = e => {
+  const m = e.data || {};
+  if (m.type === 'hello') { sendState(); return; }
+  if (m.type === 'status') { stage = m; stageAt = now(); renderStatus(); renderSlotsLive(); return; }
+  if (m.type === 'preview') { previewAt = now(); camImg.src = m.url; camImg.hidden = false; camNone.hidden = true; return; }
+  if (m.type === 'scan') { onScan(m.S); return; }
+  if (m.type === 'photo') { (m.ids || []).forEach(id => { if (db.people[id]) db.people[id].photos++; }); addLog('拍照：' + (m.ids || []).map(nameOf).join('、')); changed(false); return; }
+  if (m.type === 'pos') { const p = db.people[m.id]; if (p) { p.pos.push([m.t, m.x, m.w]); if (p.pos.length > 4000) p.pos.splice(0, p.pos.length - 4000); save(); } return; }
+  if (m.type === 'requestClear') { ['L', 'R'].forEach(k => offStage(k, 'done')); changed(true); }
+};
+setInterval(() => post({ type: 'ping' }), 2000);
+sendState(); post({ type: 'ping' });
+
+// ---------------- 動作
+const nameOf = id => (db.people[id] && db.people[id].name) || id;
+function onScan(S) {
+  if (!S || !S.id) return;
+  let p = db.people[S.id];
+  if (!p) {
+    p = db.people[S.id] = { id: S.id, name: S.name || '訪客', params: S.params, firstScan: now(), lastScan: now(), scans: 1, status: 'waiting', slot: null, stageCount: 0, stageMs: 0, stageStart: 0, photos: 0, pos: [] };
+    db.queue.push(S.id); addLog('登記：' + p.name + '（' + p.id + '）');
+  } else {
+    p.lastScan = now(); p.scans++; p.name = S.name || p.name; p.params = S.params || p.params;
+    if (p.status === 'done' || p.status === 'skipped') { p.status = 'waiting'; db.queue.push(p.id); addLog('再次排隊：' + p.name); }
+    else addLog('重複掃描：' + p.name);
+  }
+  changed(true);
+}
+function toStage(id, slot) {
+  const p = db.people[id]; if (!p) return;
+  if (p.status === 'onstage') { if (p.slot === slot) return; offStage(p.slot, 'waiting', true); }
+  if (db.slots[slot]) offStage(slot, 'waiting', true);
+  db.queue = db.queue.filter(x => x !== id);
+  p.status = 'onstage'; p.slot = slot; p.stageStart = now(); p.stageCount++;
+  db.slots[slot] = id; addLog('上台（' + (slot === 'L' ? '左' : '右') + '）：' + p.name);
+}
+function offStage(slot, to, front) {
+  const id = db.slots[slot]; if (!id) return;
+  const p = db.people[id];
+  if (p) {
+    if (p.stageStart) p.stageMs += now() - p.stageStart;
+    p.stageStart = 0; p.slot = null; p.status = to;
+    if (to === 'waiting') { if (front) db.queue.unshift(id); else db.queue.push(id); }
+    addLog((to === 'done' ? '完成：' : '回到等待：') + p.name);
+  }
+  db.slots[slot] = null;
+}
+function autoFill() {
+  if (!db.settings.autoStage) return;
+  ['L', 'R'].forEach(k => { if (!db.slots[k] && db.queue.length) toStage(db.queue[0], k); });
+}
+function changed(toStageToo) { autoFill(); save(); render(); if (toStageToo) sendState(); }
+
+// ---------------- 縮圖（用同一個模型算一張正面圖）
+const thumbs = {};
+let thumbR = null, thumbScene = null, thumbCam = null, thumbQueue = [], modelReady = false;
+function thumbKey(p) { return p.id + ':' + p.params; }
+function initThumbs() {
+  if (!window.THREE || !window.AvatarLib || !THREE.GLTFLoader) return;
+  AvatarLib.load('metabooth_avatar.glb').then(() => {
+    modelReady = true;
+    const c = document.createElement('canvas');
+    thumbR = new THREE.WebGLRenderer({ canvas: c, alpha: true, preserveDrawingBuffer: true });
+    thumbR.setSize(120, 120, false); thumbR.outputEncoding = THREE.sRGBEncoding;
+    thumbScene = new THREE.Scene();
+    thumbScene.add(new THREE.HemisphereLight(0xfff4ea, 0x5a5670, 0.65));
+    const d = new THREE.DirectionalLight(0xfff0dd, 1.0); d.position.set(3, 4, 3); thumbScene.add(d);
+    thumbCam = new THREE.PerspectiveCamera(30, 1, 0.1, 30); thumbCam.position.set(0, 1.25, 3.4); thumbCam.lookAt(0, 1.2, 0);
+    render();
+  }).catch(() => {});
+}
+function thumbFor(p) {
+  const k = thumbKey(p);
+  if (thumbs[k]) return thumbs[k];
+  if (modelReady && !thumbQueue.includes(k)) { thumbQueue.push(k); setTimeout(drainThumbs, 0); }
+  return null;
+}
+function drainThumbs() {
+  let did = false;
+  while (thumbQueue.length) {
+    const k = thumbQueue.shift(), id = k.split(':')[0], p = db.people[id]; if (!p) continue;
+    const S = stateFrom(p); if (!S) continue;
+    const r = AvatarLib.make(S); r.arms[1].rotation.z = 0.42; r.arms[-1].rotation.z = -0.42; r.root.rotation.y = 0.2;
+    thumbScene.add(r.root); thumbR.render(thumbScene, thumbCam); thumbs[k] = thumbR.domElement.toDataURL('image/png');
+    thumbScene.remove(r.root); (r.ownMaterials || []).forEach(m => m.dispose());
+    did = true;
+  }
+  if (did) render();
+}
+function thumbHTML(p, sm) {
+  const u = thumbFor(p);
+  return u ? '<img class="thumb' + (sm ? ' sm' : '') + '" alt="" src="' + u + '">' : '<div class="thumb' + (sm ? ' sm' : '') + '">' + esc((p.name || '?').slice(0, 1)) + '</div>';
+}
+
+// ---------------- 畫面
+const $ = id => document.getElementById(id);
+const camImg = $('camImg'), camNone = $('camNone');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmtDur = ms => { const s = Math.round(ms / 1000), m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+const fmtTime = t => { const d = new Date(t); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+const ago = t => { const m = Math.floor((now() - t) / 60000); return m < 1 ? '剛剛' : m + ' 分鐘'; };
+function pill(el, cls, text) { el.className = 'pill ' + cls; el.innerHTML = '<i></i>' + esc(text); }
+function renderStatus() {
+  const on = stage && now() - stageAt < 3500;
+  pill($('pStage'), on ? 'ok' : 'bad', on ? '舞台：連線中' + (stage.demo ? '（示範模式）' : '') + (stage.fps ? ' · ' + stage.fps + ' fps' : '') : '舞台：未連線');
+  pill($('pCam'), on ? (stage.cam ? 'ok' : stage.demo ? 'warn' : 'bad') : '', '鏡頭：' + (on ? (stage.cam ? '正常' : stage.demo ? '示範' : '無法使用') : '—'));
+  pill($('pTrack'), on ? (stage.track ? 'ok' : 'warn') : '', '動補：' + (on ? (stage.track ? '運作中' : '載入中') : '—'));
+  pill($('pPeople'), on ? (stage.people ? 'ok' : '') : '', '畫面中：' + (on ? stage.people + ' 人' + (stage.ignored ? '（忽略 ' + stage.ignored + '）' : '') : '—'));
+  if (!on || now() - previewAt > 4000) { camImg.hidden = true; camNone.hidden = false; }
+}
+function slotStatus(k) {
+  const on = stage && now() - stageAt < 3500, info = on && stage.slots && stage.slots[k];
+  if (!on) return ['idle', '舞台未連線'];
+  if (stage.demo) return ['ok', '示範動作'];
+  if (!info) return ['warn', '載入中'];
+  return info.bound ? ['ok', '已綁定玩家'] : ['warn', '找人中：請站到' + (k === 'L' ? '左邊' : '右邊')];
+}
+function renderSlots() {
+  $('slots').innerHTML = ['L', 'R'].map(k => {
+    const id = db.slots[k], p = id && db.people[id], label = k === 'L' ? '左邊' : '右邊';
+    if (!p) return '<div class="slot ' + k + ' empty"><div><div class="tag">' + label + '</div><div>空位</div><small>從等待區按「上' + (k === 'L' ? '左' : '右') + '」</small></div></div>';
+    const [cls, txt] = slotStatus(k);
+    return '<div class="slot ' + k + ' filled">' + thumbHTML(p) +
+      '<div class="info"><div class="tag">' + label + '</div><div class="name">' + esc(p.name) + '</div>' +
+      '<span class="chip ' + cls + '" data-live="' + k + '">' + esc(txt) + '</span>' +
+      '<div class="meta"><span>No.' + esc(p.id) + '</span><span data-timer="' + k + '">台上 ' + fmtDur(now() - p.stageStart) + '</span><span>拍照 ' + p.photos + '</span></div>' +
+      '<div class="acts"><button class="btn" type="button" data-act="back" data-slot="' + k + '">回到等待</button><button class="btn primary" type="button" data-act="done" data-slot="' + k + '">完成</button></div></div></div>';
+  }).join('');
+}
+function renderSlotsLive() {
+  ['L', 'R'].forEach(k => {
+    const chip = document.querySelector('[data-live="' + k + '"]'); if (!chip) return;
+    const [cls, txt] = slotStatus(k); chip.className = 'chip ' + cls; chip.textContent = txt;
+    const p = db.slots[k] && db.people[db.slots[k]], tm = document.querySelector('[data-timer="' + k + '"]');
+    if (p && tm) tm.textContent = '台上 ' + fmtDur(now() - p.stageStart);
+  });
+}
+function renderQueue() {
+  $('qCount').textContent = db.queue.length;
+  if (!db.queue.length) { $('queue').innerHTML = '<div class="empty-note">還沒有人排隊。<br>同學在舞台鏡頭前掃分身票，就會出現在這裡。</div>'; return; }
+  $('queue').innerHTML = db.queue.map((id, i) => {
+    const p = db.people[id]; if (!p) return '';
+    return '<div class="qi"><span class="n">' + (i + 1) + '</span>' + thumbHTML(p, true) +
+      '<div style="min-width:0"><div class="nm">' + esc(p.name) + '</div><div class="sub">No.' + esc(p.id) + ' · 等了 ' + ago(p.lastScan) + ' · ' + esc(lookText(p)) + '</div></div>' +
+      '<div class="acts"><button class="btn L" type="button" data-act="toL" data-id="' + esc(id) + '">上左</button><button class="btn R" type="button" data-act="toR" data-id="' + esc(id) + '">上右</button>' +
+      '<button class="btn" type="button" data-act="skip" data-id="' + esc(id) + '" aria-label="跳過 ' + esc(p.name) + '">跳過</button></div></div>';
+  }).join('');
+}
+function renderTable() {
+  const list = Object.values(db.people).sort((a, b) => b.firstScan - a.firstScan);
+  const done = list.filter(p => p.status === 'done'), photos = list.reduce((s, p) => s + p.photos, 0);
+  const staged = list.filter(p => p.stageCount > 0), avg = staged.length ? staged.reduce((s, p) => s + p.stageMs + (p.stageStart ? now() - p.stageStart : 0), 0) / staged.length : 0;
+  $('stats').innerHTML = [['總登記', list.length], ['排隊中', db.queue.length], ['已完成', done.length], ['總拍照數', photos], ['平均台上時間', fmtDur(avg)]]
+    .map(([l, v]) => '<div class="stat"><b>' + v + '</b><span>' + l + '</span></div>').join('');
+  const q = $('search').value.trim().toLowerCase();
+  const ST = { waiting: '排隊中', onstage: '台上', done: '已完成', skipped: '已跳過' };
+  $('rows').innerHTML = list.filter(p => !q || (p.name || '').toLowerCase().includes(q) || p.id.toLowerCase().includes(q)).map(p =>
+    '<tr><td class="mono">' + esc(p.id) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(lookText(p)) + '</td><td class="mono">' + fmtTime(p.firstScan) + '</td>' +
+    '<td><span class="st ' + p.status + '">' + ST[p.status] + (p.status === 'onstage' ? '（' + (p.slot === 'L' ? '左' : '右') + '）' : '') + '</span></td>' +
+    '<td class="mono">' + p.stageCount + '</td><td class="mono">' + fmtDur(p.stageMs + (p.stageStart ? now() - p.stageStart : 0)) + '</td><td class="mono">' + p.photos + '</td><td class="mono">' + p.pos.length + ' 點</td>' +
+    '<td>' + (p.status === 'done' || p.status === 'skipped' ? '<button class="btn" type="button" data-act="requeue" data-id="' + esc(p.id) + '">再排一次</button>' : '') + '</td></tr>'
+  ).join('') || '<tr><td colspan="10" style="color:var(--muted)">還沒有紀錄</td></tr>';
+}
+function renderLog() { $('log').innerHTML = db.log.slice(-60).reverse().map(([t, x]) => '<div>' + fmtTime(t) + '  ' + esc(x) + '</div>').join('') || '<div>—</div>'; }
+function renderSettings() {
+  const s = db.settings;
+  $('autoStage').checked = !!s.autoStage;
+  $('zoneL').value = Math.round(s.zone[0] * 100); $('zoneLOut').textContent = Math.round(s.zone[0] * 100) + '%';
+  $('zoneR').value = Math.round(s.zone[1] * 100); $('zoneROut').textContent = Math.round(s.zone[1] * 100) + '%';
+  $('minSh').value = Math.round(s.minShoulder * 100); $('minShOut').textContent = Math.round(s.minShoulder * 100);
+}
+function render() { renderSlots(); renderQueue(); renderTable(); renderLog(); renderStatus(); }
+
+// ---------------- 事件
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const act = b.dataset.act, id = b.dataset.id, slot = b.dataset.slot;
+  if (act === 'toL' || act === 'toR') { toStage(id, act === 'toL' ? 'L' : 'R'); changed(true); }
+  else if (act === 'skip') { const p = db.people[id]; db.queue = db.queue.filter(x => x !== id); if (p) { p.status = 'skipped'; addLog('跳過：' + p.name); } changed(true); }
+  else if (act === 'back') { offStage(slot, 'waiting', false); changed(true); }
+  else if (act === 'done') { offStage(slot, 'done'); changed(true); }
+  else if (act === 'requeue') { const p = db.people[id]; if (p) { p.status = 'waiting'; db.queue.push(id); addLog('再次排隊：' + p.name); } changed(true); }
+});
+$('autoStage').addEventListener('change', e => { db.settings.autoStage = e.target.checked; changed(true); });
+function onZone() {
+  let l = +$('zoneL').value / 100, r = +$('zoneR').value / 100;
+  db.settings.zone = [l, r]; db.settings.minShoulder = +$('minSh').value / 100;
+  renderSettings(); save(); sendState();
+}
+['zoneL', 'zoneR', 'minSh'].forEach(i => $(i).addEventListener('input', onZone));
+$('capBtn').addEventListener('click', () => post({ type: 'capture' }));
+$('rebindBtn').addEventListener('click', () => { post({ type: 'rebind' }); addLog('重新綁定'); renderLog(); });
+$('themeBtn').addEventListener('click', () => post({ type: 'theme' }));
+$('clearStageBtn').addEventListener('click', () => { ['L', 'R'].forEach(k => offStage(k, 'done')); changed(true); });
+$('search').addEventListener('input', renderTable);
+let wipeArm = 0;
+$('wipeBtn').addEventListener('click', () => {
+  const b = $('wipeBtn');
+  if (!wipeArm) { wipeArm = setTimeout(() => { wipeArm = 0; b.classList.remove('armed'); b.textContent = '清除全部資料'; }, 3000); b.classList.add('armed'); b.textContent = '再按一次確認清除'; return; }
+  clearTimeout(wipeArm); wipeArm = 0; b.classList.remove('armed'); b.textContent = '清除全部資料';
+  const keep = db.settings; db = fresh(); db.settings = keep; addLog('已清除全部資料'); changed(true);
+});
+function download(name, rows) {
+  const csv = '﻿' + rows.map(r => r.map(v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\r\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+$('exportBtn').addEventListener('click', () => {
+  const ST = { waiting: '排隊中', onstage: '台上', done: '已完成', skipped: '已跳過' };
+  const rows = [['編號', '名字', '造型參數', '髮型', '服裝', '配件', '第一次登記', '最後掃描', '掃描次數', '狀態', '上台次數', '台上秒數', '拍照數', '走動紀錄點數']];
+  Object.values(db.people).sort((a, b) => a.firstScan - b.firstScan).forEach(p => {
+    const S = stateFrom(p) || {};
+    rows.push([p.id, p.name, p.params, LISTS.hair[S.hair], LISTS.outfit[S.outfit], LISTS.acc[S.acc], new Date(p.firstScan).toLocaleString(), new Date(p.lastScan).toLocaleString(),
+      p.scans, ST[p.status], p.stageCount, Math.round((p.stageMs + (p.stageStart ? now() - p.stageStart : 0)) / 1000), p.photos, p.pos.length]);
+  });
+  download('metabooth_紀錄_' + stamp() + '.csv', rows);
+});
+$('exportPosBtn').addEventListener('click', () => {
+  const rows = [['編號', '名字', '時間', '左右位置(0=最左,1=最右)', '肩寬(越大越靠近鏡頭)']];
+  Object.values(db.people).forEach(p => p.pos.forEach(([t, x, w]) => rows.push([p.id, p.name, new Date(t).toLocaleString(), x, w])));
+  download('metabooth_走動紀錄_' + stamp() + '.csv', rows);
+});
+window.addEventListener('storage', e => { if (e.key === STORE_KEY && e.newValue) { try { db = Object.assign(fresh(), JSON.parse(e.newValue)); render(); renderSettings(); } catch (err) {} } });
+
+setInterval(() => { renderStatus(); renderSlotsLive(); }, 1000);
+setInterval(() => { renderQueue(); renderTable(); }, 15000);
+window.metaConsole = { get db() { return db; }, onScan };
+renderSettings(); render(); initThumbs();
+})();
+</script>
+</body>
+</html>
